@@ -1,22 +1,21 @@
 import * as dotenv from 'dotenv';
 import { Telegraf, Context } from 'telegraf';
+import { message } from 'telegraf/filters';
 import { createClient } from '@supabase/supabase-js';
 import axios from 'axios';
 
 dotenv.config();
 
-// ============= CONFIGURAZIONE =============
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_KEY!
 );
 
-const ODDS_API_KEY = process.env.THE_ODDS_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const ODDS_API_KEY = process.env.THE_ODDS_API_KEY!;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
 
-// ============= LISTE PAESI E LEGHE =============
 const COUNTRIES_LEAGUES: Record<string, string[]> = {
   'Italy': ['italy_serie_a', 'italy_serie_b', 'italy_serie_c'],
   'England': ['england_premier_league', 'england_championship', 'england_efl_1', 'england_efl_2'],
@@ -31,7 +30,6 @@ const COUNTRIES_LEAGUES: Record<string, string[]> = {
   'Morocco': ['morocco_botola_pro']
 };
 
-// ============= INTERFACCE TYPESCRIPT =============
 interface Match {
   id: string;
   home_team: string;
@@ -57,14 +55,13 @@ interface Prediction {
   market_analysis: Record<string, any>;
 }
 
-// ============= CACHE SYSTEM =============
 interface CacheEntry {
   data: any;
   timestamp: number;
 }
 
 const cache: Map<string, CacheEntry> = new Map();
-const CACHE_DURATION = 3600000; // 1 ora
+const CACHE_DURATION = 3600000;
 
 function getCachedData(key: string): any | null {
   const entry = cache.get(key);
@@ -78,8 +75,6 @@ function getCachedData(key: string): any | null {
 function setCachedData(key: string, data: any): void {
   cache.set(key, { data, timestamp: Date.now() });
 }
-
-// ============= UTILITY FUNCTIONS =============
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -117,7 +112,6 @@ async function getMatchesToday(): Promise<Match[]> {
         console.error(`Errore fetch ${league}:`, error instanceof Error ? error.message : error);
       }
       
-      // Rate limiting
       await delay(200);
     }
   }
@@ -194,8 +188,8 @@ Fornisci risposta SOLO in JSON (valido) con questa struttura ESATTA:
       match_id: match.id,
       home_team: match.home_team,
       away_team: match.away_team,
-      league: match.league,
-      country: match.country,
+      league: match.league || '',
+      country: match.country || '',
       prediction_type: predictionMap[analysis.primary_prediction] || '1X2',
       prediction_value: analysis.primary_prediction,
       confidence: Math.min(Math.max(analysis.confidence || 65, 0), 100),
@@ -294,8 +288,6 @@ Valore: ${prediction.market_analysis['value_assessment'] || '-'}
 `;
 }
 
-// ============= TELEGRAM BOT COMMANDS =============
-
 bot.command('start', async (ctx: Context) => {
   const userId = ctx.from?.id;
   
@@ -303,9 +295,8 @@ bot.command('start', async (ctx: Context) => {
     const { data } = await supabase
       .from('user_preferences')
       .select('*')
-      .eq('user_id', userId)
-      .single()
-      .catch(() => ({ data: null }));
+      .eq('user_id', userId!)
+      .single();
 
     if (!data) {
       await supabase
@@ -366,9 +357,8 @@ bot.command('analyze', async (ctx: Context) => {
         const { data: prefs } = await supabase
           .from('user_preferences')
           .select('*')
-          .eq('user_id', userId)
-          .single()
-          .catch(() => ({ data: null }));
+          .eq('user_id', userId!)
+          .single();
 
         if (prefs && match.country && match.league) {
           if (prefs.countries.includes(match.country) || 
@@ -429,9 +419,8 @@ bot.command('settings', async (ctx: Context) => {
     const { data } = await supabase
       .from('user_preferences')
       .select('*')
-      .eq('user_id', userId)
-      .single()
-      .catch(() => ({ data: null }));
+      .eq('user_id', userId!)
+      .single();
 
     if (!data) {
       await ctx.reply('❌ Preferenze non trovate. Digita /start');
@@ -461,14 +450,14 @@ Mercati: ${data.markets_preferred.join(', ')}
 
 bot.command('set_country', async (ctx: Context) => {
   const userId = ctx.from?.id;
-  const args = ctx.message?.text?.split(' ').slice(1).join(' ');
+  const args = (ctx.message as any)?.text?.split(' ').slice(1).join(' ');
 
   if (!args) {
     await ctx.reply('Uso: /set_country Italia,Inghilterra,Spagna');
     return;
   }
 
-  const countries = args.split(',').map(c => c.trim());
+  const countries = args.split(',').map((c: string) => c.trim());
 
   try {
     await supabase
@@ -484,7 +473,7 @@ bot.command('set_country', async (ctx: Context) => {
 
 bot.command('set_confidence', async (ctx: Context) => {
   const userId = ctx.from?.id;
-  const confidence = parseInt(ctx.message?.text?.split(' ')[1] || '65');
+  const confidence = parseInt((ctx.message as any)?.text?.split(' ')[1] || '65');
 
   if (isNaN(confidence) || confidence < 0 || confidence > 100) {
     await ctx.reply('❌ Valore non valido. Usa numero tra 0-100');
@@ -504,14 +493,11 @@ bot.command('set_confidence', async (ctx: Context) => {
 });
 
 bot.command('stats', async (ctx: Context) => {
-  const userId = ctx.from?.id;
-
   try {
     const { data: predictions } = await supabase
       .from('predictions')
       .select('status, profit_loss, confidence')
-      .in('status', ['won', 'lost'])
-      .catch(() => ({ data: [] }));
+      .in('status', ['won', 'lost']);
 
     const won = predictions?.filter((p: any) => p.status === 'won').length || 0;
     const lost = predictions?.filter((p: any) => p.status === 'lost').length || 0;
@@ -547,24 +533,23 @@ bot.command('history', async (ctx: Context) => {
       .from('predictions')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(10)
-      .catch(() => ({ data: [] }));
+      .limit(10);
 
     if (!predictions || predictions.length === 0) {
       await ctx.reply('❌ Nessuna storia disponibile');
       return;
     }
 
-    let message = '<b>📈 ULTIMI 10 MATCH ANALIZZATI</b>\n\n';
+    let messageText = '<b>📈 ULTIMI 10 MATCH ANALIZZATI</b>\n\n';
 
     predictions.forEach((pred: any, idx: number) => {
       const status = pred.status === 'won' ? '✅' : pred.status === 'lost' ? '❌' : '⏳';
-      message += `${idx + 1}. ${status} ${pred.home_team} vs ${pred.away_team}\n`;
-      message += `   Previsione: ${pred.prediction_value} (${pred.confidence}%)\n`;
-      message += `   Stato: ${pred.status}\n\n`;
+      messageText += `${idx + 1}. ${status} ${pred.home_team} vs ${pred.away_team}\n`;
+      messageText += `   Previsione: ${pred.prediction_value} (${pred.confidence}%)\n`;
+      messageText += `   Stato: ${pred.status}\n\n`;
     });
 
-    await ctx.replyWithHTML(message);
+    await ctx.replyWithHTML(messageText);
   } catch (error) {
     await ctx.reply('❌ Errore nel caricamento storico');
   }
@@ -630,16 +615,12 @@ Gioca responsabilmente.
 `);
 });
 
-bot.on('message', async (ctx: Context) => {
-  if (!ctx.message) return;
-  
-  const text = ctx.message.text;
+bot.on(message(), async (ctx: Context) => {
+  const text = (ctx.message as any)?.text;
   if (text && !text.startsWith('/')) {
     await ctx.reply('❓ Comando non riconosciuto. Digita /help per i comandi disponibili.');
   }
 });
-
-// ============= ERROR HANDLING & STARTUP =============
 
 bot.catch((err: any, ctx: Context) => {
   console.error('Errore bot:', err);
@@ -653,9 +634,7 @@ bot.launch().then(() => {
   process.exit(1);
 });
 
-// Graceful shutdown
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 export default bot;
-

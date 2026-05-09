@@ -2,15 +2,22 @@ import * as dotenv from 'dotenv';
 import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 import axios from 'axios';
 
 dotenv.config();
 
-const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_KEY!
+  process.env.SUPABASE_KEY!,
+  {
+    realtime: {
+      transport: ws
+    }
+  }
 );
+
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 
 const ODDS_API_KEY = process.env.THE_ODDS_API_KEY!;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
@@ -395,8 +402,8 @@ bot.command('analyze', async (ctx: Context) => {
     const predictionsToShow = predictions.slice(0, 5);
     
     for (const pred of predictionsToShow) {
-      const message = await formatPredictionMessage(pred);
-      await ctx.replyWithHTML(message);
+      const msg = await formatPredictionMessage(pred);
+      await ctx.replyWithHTML(msg);
       await delay(500);
     }
 
@@ -427,7 +434,7 @@ bot.command('settings', async (ctx: Context) => {
       return;
     }
 
-    const message = `
+    const settingsMsg = `
 ⚙️ <b>LE TUE PREFERENZE</b>
 
 Paesi: ${data.countries.join(', ')}
@@ -441,7 +448,7 @@ Mercati: ${data.markets_preferred.join(', ')}
 /set_confidence 70
 `;
 
-    await ctx.replyWithHTML(message);
+    await ctx.replyWithHTML(settingsMsg);
   } catch (error) {
     console.error('Errore settings:', error);
     await ctx.reply('❌ Errore nel caricamento preferenze');
@@ -508,7 +515,7 @@ bot.command('stats', async (ctx: Context) => {
       ? (predictions.reduce((sum: number, p: any) => sum + p.confidence, 0) / predictions.length).toFixed(1)
       : 0;
 
-    const message = `
+    const statsMsg = `
 📊 <b>LE TUE STATISTICHE</b>
 
 ✅ Previsioni corrette: <b>${won}</b>
@@ -520,7 +527,7 @@ Confidenza media: <b>${avgConfidence}%</b>
 Previsioni totali: <b>${total}</b>
 `;
 
-    await ctx.replyWithHTML(message);
+    await ctx.replyWithHTML(statsMsg);
   } catch (error) {
     console.error('Errore stats:', error);
     await ctx.reply('❌ Errore nel caricamento statistiche');
@@ -540,16 +547,16 @@ bot.command('history', async (ctx: Context) => {
       return;
     }
 
-    let messageText = '<b>📈 ULTIMI 10 MATCH ANALIZZATI</b>\n\n';
+    let historyMsg = '<b>📈 ULTIMI 10 MATCH ANALIZZATI</b>\n\n';
 
     predictions.forEach((pred: any, idx: number) => {
       const status = pred.status === 'won' ? '✅' : pred.status === 'lost' ? '❌' : '⏳';
-      messageText += `${idx + 1}. ${status} ${pred.home_team} vs ${pred.away_team}\n`;
-      messageText += `   Previsione: ${pred.prediction_value} (${pred.confidence}%)\n`;
-      messageText += `   Stato: ${pred.status}\n\n`;
+      historyMsg += `${idx + 1}. ${status} ${pred.home_team} vs ${pred.away_team}\n`;
+      historyMsg += `   Previsione: ${pred.prediction_value} (${pred.confidence}%)\n`;
+      historyMsg += `   Stato: ${pred.status}\n\n`;
     });
 
-    await ctx.replyWithHTML(messageText);
+    await ctx.replyWithHTML(historyMsg);
   } catch (error) {
     await ctx.reply('❌ Errore nel caricamento storico');
   }

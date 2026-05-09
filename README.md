@@ -1,0 +1,2 @@
+# SchedAI
+AI Powered Tipster

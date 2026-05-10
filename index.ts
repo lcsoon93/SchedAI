@@ -10,9 +10,7 @@ const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_KEY!,
   {
-    db: {
-      schema: 'public'
-    }
+    realtime: null as any
   }
 );
 

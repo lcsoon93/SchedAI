@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import axios from 'axios';
 
 dotenv.config();
@@ -10,9 +11,13 @@ const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_KEY!,
   {
-    realtime: null as any
+    global: {
+      fetch: fetch as any
+    }
   }
 );
+
+(globalThis as any).WebSocket = WebSocket;
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 

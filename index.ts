@@ -13,10 +13,13 @@ async function testOddsAPI() {
     console.log('Testing The-Odds-API...');
     console.log('API Key:', ODDS_API_KEY ? 'OK' : 'MISSING');
     
-    const response = await axios.get('https://api.the-odds-api.com/v4/sports/soccer/events', {
+    const sportKey = 'soccer_epl'; // Inserito qui per pulizia
+
+    // 1. URL corretto con lo sportKey integrato nel path
+    // 2. L'endpoint termina con /odds
+    const response = await axios.get(`https://api.the-odds-api.com/v4/sports/${sportKey}/odds`, {
       params: {
         apiKey: ODDS_API_KEY,
-        sport_key: 'soccer_epl',
         regions: 'eu',
         markets: 'h2h',
         oddsFormat: 'decimal'
@@ -34,7 +37,9 @@ async function testOddsAPI() {
     return [];
   } catch (error) {
     console.error('Error:', error instanceof Error ? error.message : error);
-    if (error instanceof axios.AxiosError) {
+    
+    // Metodo corretto per verificare un errore Axios in TypeScript
+    if (axios.isAxiosError(error)) {
       console.error('Response:', error.response?.status, error.response?.data);
     }
     return [];

@@ -2,22 +2,21 @@ import * as dotenv from 'dotenv';
 import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { createClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
 import axios from 'axios';
 
 dotenv.config();
 
+console.log('🔧 Avvio bot...');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? '✅' : '❌');
+console.log('SUPABASE_KEY:', process.env.SUPABASE_KEY ? '✅' : '❌');
+console.log('TELEGRAM_BOT_TOKEN:', process.env.TELEGRAM_BOT_TOKEN ? '✅' : '❌');
+console.log('THE_ODDS_API_KEY:', process.env.THE_ODDS_API_KEY ? '✅' : '❌');
+console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅' : '❌');
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_KEY!,
-  {
-    global: {
-      fetch: fetch as any
-    }
-  }
+  process.env.SUPABASE_KEY!
 );
-
-(globalThis as any).WebSocket = WebSocket;
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 
@@ -26,17 +25,12 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY!;
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
 
 const COUNTRIES_LEAGUES: Record<string, string[]> = {
-  'Italy': ['italy_serie_a', 'italy_serie_b', 'italy_serie_c'],
-  'England': ['england_premier_league', 'england_championship', 'england_efl_1', 'england_efl_2'],
-  'Spain': ['spain_la_liga', 'spain_segunda'],
-  'Germany': ['germany_bundesliga', 'germany_2bundesliga'],
-  'France': ['france_ligue_1', 'france_ligue_2'],
-  'Netherlands': ['netherlands_eredivisie', 'netherlands_eerste_divisie'],
-  'Croatia': ['croatia_hnl'],
-  'Greece': ['greece_super_league'],
-  'Sweden': ['sweden_allsvenskan', 'sweden_superettan'],
-  'Turkey': ['turkey_super_lig', 'turkey_1_lig'],
-  'Morocco': ['morocco_botola_pro']
+  'Italy': ['italy_serie_a', 'italy_serie_b'],
+  'England': ['england_premier_league'],
+  'Spain': ['spain_la_liga'],
+  'Germany': ['germany_bundesliga'],
+  'France': ['france_ligue_1'],
+  'Netherlands': ['netherlands_eredivisie']
 };
 
 interface Match {
@@ -92,23 +86,30 @@ function delay(ms: number): Promise<void> {
 async function getMatchesToday(): Promise<Match[]> {
   const cacheKey = 'matches_today';
   const cached = getCachedData(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    console.log(`📦 Cache: ${cached.length} partite in cache`);
+    return cached;
+  }
 
   const allMatches: Match[] = [];
   
   for (const [country, leagues] of Object.entries(COUNTRIES_LEAGUES)) {
     for (const league of leagues) {
       try {
+        console.log(`🔍 Fetching ${league}...`);
         const response = await axios.get('https://api.the-odds-api.com/v4/sports/soccer/events', {
           params: {
             apiKey: ODDS_API_KEY,
             sport_key: league,
             daysFrom: 1,
             oddsFormat: 'decimal',
-            markets: 'h2h,spreads,totals,outrights'
+            markets: 'h2h'
           },
           timeout: 8000
         });
+
+        const count = response.data?.length || 0;
+        console.log(`   ✅ ${league}: ${count} partite`);
 
         if (response.data && Array.isArray(response.data)) {
           allMatches.push(...response.data.map((m: any) => ({
@@ -118,45 +119,20 @@ async function getMatchesToday(): Promise<Match[]> {
           })));
         }
       } catch (error) {
-        console.error(`Errore fetch ${league}:`, error instanceof Error ? error.message : error);
+        console.error(`   ❌ Errore ${league}:`, error instanceof Error ? error.message : error);
       }
       
       await delay(200);
     }
   }
   
+  console.log(`📊 Totale partite trovate: ${allMatches.length}`);
   setCachedData(cacheKey, allMatches);
   return allMatches;
 }
 
 async function analyzeMatchWithGemini(match: Match): Promise<Prediction | null> {
-  const prompt = `Analizza questa partita di calcio e fornisci una previsione SPORTIVA basata su analisi statistica generale.
-
-Partita: ${match.home_team} vs ${match.away_team}
-Lega: ${match.league}
-Paese: ${match.country}
-Data: ${new Date(match.commence_time).toLocaleString()}
-
-IMPORTANTE: Non hai accesso a dati real-time. Fornisci comunque un'analisi basata su:
-1. Tipologie squadre (dedotte dai nomi)
-2. Pattern storici comuni
-3. Fattori ambientali (casa/trasferta)
-4. Trend stagionali della lega
-
-Fornisci risposta SOLO in JSON (valido) con questa struttura ESATTA:
-{
-  "primary_prediction": "HOME" | "DRAW" | "AWAY" | "OVER_2.5" | "UNDER_2.5" | "BTTS_YES" | "BTTS_NO",
-  "confidence": 65,
-  "reasoning": "Breve spiegazione (max 100 caratteri)",
-  "market_recommendations": {
-    "1X2": "HOME",
-    "over_under": "2.5",
-    "btts": "YES",
-    "asian_handicap": "-0.5"
-  },
-  "risk_level": "MEDIUM",
-  "value_assessment": "Fair Value"
-}`;
+  const prompt = `Analizza: ${match.home_team} vs ${match.away_team}. Rispondi in JSON: {"primary_prediction": "HOME|DRAW|AWAY", "confidence": 70, "reasoning": "...", "market_recommendations": {}}`;
 
   try {
     const response = await axios.post(
@@ -177,21 +153,10 @@ Fornisci risposta SOLO in JSON (valido) con questa struttura ESATTA:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     
     if (!jsonMatch) {
-      console.error('No JSON found in response:', text.substring(0, 200));
       return null;
     }
 
     const analysis = JSON.parse(jsonMatch[0]);
-
-    const predictionMap: Record<string, string> = {
-      'HOME': '1X2',
-      'AWAY': '1X2',
-      'DRAW': '1X2',
-      'OVER_2.5': 'TOTAL_GOALS',
-      'UNDER_2.5': 'TOTAL_GOALS',
-      'BTTS_YES': 'BTTS',
-      'BTTS_NO': 'BTTS'
-    };
 
     return {
       match_id: match.id,
@@ -199,45 +164,17 @@ Fornisci risposta SOLO in JSON (valido) con questa struttura ESATTA:
       away_team: match.away_team,
       league: match.league || '',
       country: match.country || '',
-      prediction_type: predictionMap[analysis.primary_prediction] || '1X2',
-      prediction_value: analysis.primary_prediction,
+      prediction_type: '1X2',
+      prediction_value: analysis.primary_prediction || 'HOME',
       confidence: Math.min(Math.max(analysis.confidence || 65, 0), 100),
-      reasoning: analysis.reasoning || 'Analisi completata',
+      reasoning: analysis.reasoning || 'Analisi',
       odds_available: {},
       market_analysis: analysis.market_recommendations || {}
     };
   } catch (error) {
-    console.error('Errore Gemini API:', error instanceof Error ? error.message : error);
+    console.error('Errore Gemini:', error instanceof Error ? error.message : error);
     return null;
   }
-}
-
-async function getOddsForMatch(match: Match): Promise<Record<string, number>> {
-  const odds: Record<string, number> = {};
-  
-  try {
-    if (match.bookmakers && match.bookmakers.length > 0) {
-      const bookmaker = match.bookmakers[0];
-      if (bookmaker.markets) {
-        for (const market of bookmaker.markets) {
-          if (market.key === 'h2h' && market.outcomes) {
-            for (const outcome of market.outcomes) {
-              odds[`h2h_${outcome.name}`] = outcome.price || 0;
-            }
-          }
-          if (market.key && market.key.includes('totals') && market.outcomes) {
-            for (const outcome of market.outcomes) {
-              odds[`${market.key}_${outcome.name}`] = outcome.price || 0;
-            }
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Errore estrazione quote:', error);
-  }
-  
-  return odds;
 }
 
 async function savePredictionToSupabase(prediction: Prediction): Promise<boolean> {
@@ -261,7 +198,7 @@ async function savePredictionToSupabase(prediction: Prediction): Promise<boolean
       });
 
     if (error) {
-      console.error('Errore DB:', error);
+      console.error('Errore DB insert:', error);
       return false;
     }
     return true;
@@ -271,34 +208,9 @@ async function savePredictionToSupabase(prediction: Prediction): Promise<boolean
   }
 }
 
-async function formatPredictionMessage(prediction: Prediction): Promise<string> {
-  return `
-🎯 <b>ANALISI MATCH</b>
-
-⚽ <b>${prediction.home_team} vs ${prediction.away_team}</b>
-🏆 ${prediction.league} - ${prediction.country}
-
-📊 <b>PREVISIONE PRINCIPALE</b>
-Risultato: <b>${prediction.prediction_value}</b>
-Confidenza: <b>${prediction.confidence}%</b> ${prediction.confidence >= 75 ? '✅' : prediction.confidence >= 60 ? '⚠️' : '❌'}
-Motivazione: ${prediction.reasoning}
-
-📈 <b>ANALISI MERCATI</b>
-• 1X2: ${prediction.market_analysis['1X2'] || '-'}
-• Over/Under: ${prediction.market_analysis['over_under'] || '-'}
-• BTTS: ${prediction.market_analysis['btts'] || '-'}
-• Asian HC: ${prediction.market_analysis['asian_handicap'] || '-'}
-
-💰 <b>VALUTAZIONE VALORE</b>
-Rischio: ${prediction.market_analysis['risk_level'] || '-'}
-Valore: ${prediction.market_analysis['value_assessment'] || '-'}
-
-⚠️ Analisi AI - Usa responsabilmente!
-`;
-}
-
 bot.command('start', async (ctx: Context) => {
   const userId = ctx.from?.id;
+  console.log(`👤 /start da user ${userId}`);
   
   try {
     const { data } = await supabase
@@ -308,6 +220,7 @@ bot.command('start', async (ctx: Context) => {
       .single();
 
     if (!data) {
+      console.log(`   Creando preferenze per ${userId}`);
       const { error } = await supabase
         .from('user_preferences')
         .insert({
@@ -315,46 +228,28 @@ bot.command('start', async (ctx: Context) => {
           countries: Object.keys(COUNTRIES_LEAGUES),
           leagues: ['italy_serie_a'],
           min_confidence: 65,
-          markets_preferred: ['1X2', 'OVER_2.5', 'BTTS']
+          markets_preferred: ['1X2']
         });
       
       if (error) {
-        console.error('Errore insert preferenze:', error);
+        console.error(`   ❌ Errore insert:`, error);
+      } else {
+        console.log(`   ✅ Preferenze create`);
       }
     }
   } catch (error) {
     console.error('Errore start:', error);
   }
 
-  await ctx.replyWithHTML(`
-<b>🤖 Football Prediction Bot AI</b>
-
-Benvenuto! Questo bot analizza partite calcistiche usando Gemini AI.
-
-<b>📋 Comandi disponibili:</b>
-/analyze - Analizza partite di oggi
-/settings - Modifica preferenze
-/history - Storico previsioni
-/stats - Statistiche performance
-/markets - Guida mercati
-/help - Aiuto completo
-
-<b>ℹ️ Note importanti:</b>
-• L'analisi è supportata da AI generativa
-• Usa sempre responsabilmente
-• Non vincere più di quanto puoi perdere
-• Consulta esperti sportivi per info approfondite
-
-Digita /analyze per iniziare!
-`);
+  await ctx.reply('✅ Bot avviato!\n/analyze - Analizza partite\n/init - Crea preferenze');
 });
 
 bot.command('init', async (ctx: Context) => {
   const userId = ctx.from?.id;
-  
-  console.log(`🔧 /init comando - user_id: ${userId}`);
+  console.log(`🔧 /init da user ${userId}`);
   
   try {
+    console.log(`   Tentando upsert...`);
     const { error } = await supabase
       .from('user_preferences')
       .upsert({
@@ -362,101 +257,84 @@ bot.command('init', async (ctx: Context) => {
         countries: Object.keys(COUNTRIES_LEAGUES),
         leagues: ['italy_serie_a'],
         min_confidence: 65,
-        markets_preferred: ['1X2', 'OVER_2.5', 'BTTS']
+        markets_preferred: ['1X2']
       }, {
         onConflict: 'user_id'
       });
 
     if (error) {
+      console.error(`   ❌ Errore upsert:`, error.message);
       throw error;
     }
 
-    console.log(`✅ Preferenze create per user ${userId}`);
-    await ctx.reply('✅ Preferenze inizializzate!\n\nDigita /settings per vederle');
+    console.log(`   ✅ Upsert riuscito`);
+    await ctx.reply('✅ Preferenze create!');
   } catch (error) {
-    console.error('❌ Errore /init:', error);
+    console.error('Errore /init:', error);
     await ctx.reply('❌ Errore: ' + (error instanceof Error ? error.message : 'Errore sconosciuto'));
   }
 });
 
 bot.command('analyze', async (ctx: Context) => {
   const userId = ctx.from?.id;
+  console.log(`📊 /analyze da user ${userId}`);
   
-  await ctx.reply('🔄 Analizzando partite... Attendi 30-60 secondi');
+  await ctx.reply('🔄 Analizzando...');
 
   try {
     const matches = await getMatchesToday();
+    console.log(`   Trovate ${matches.length} partite`);
     
     if (matches.length === 0) {
-      await ctx.reply('❌ Nessuna partita trovata per oggi');
+      await ctx.reply('❌ Nessuna partita trovata');
       return;
     }
 
     const predictions: Prediction[] = [];
-    let processed = 0;
 
-    for (const match of matches) {
+    for (const match of matches.slice(0, 10)) {
       try {
-        const { data: prefs } = await supabase
-          .from('user_preferences')
-          .select('*')
-          .eq('user_id', userId!)
-          .single();
-
-        if (prefs && match.country && match.league) {
-          if (prefs.countries.includes(match.country) || 
-              prefs.leagues.includes(match.league)) {
-            
-            const prediction = await analyzeMatchWithGemini(match);
-            
-            if (prediction && prediction.confidence >= (prefs?.min_confidence || 65)) {
-              const odds = await getOddsForMatch(match);
-              prediction.odds_available = odds;
-              
-              await savePredictionToSupabase(prediction);
-              predictions.push(prediction);
-            }
-          }
-        }
-
-        processed++;
-        if (processed % 5 === 0) {
-          console.log(`Processate ${processed} partite...`);
+        const prediction = await analyzeMatchWithGemini(match);
+        
+        if (prediction && prediction.confidence >= 60) {
+          await savePredictionToSupabase(prediction);
+          predictions.push(prediction);
+          console.log(`   ✅ ${match.home_team} vs ${match.away_team}`);
         }
       } catch (error) {
-        console.error('Errore analisi match:', error);
+        console.error('Errore analisi:', error);
       }
 
-      await delay(300);
-    }
-
-    if (predictions.length === 0) {
-      await ctx.reply('❌ Nessuna previsione con confidenza sufficiente trovata');
-      return;
-    }
-
-    const predictionsToShow = predictions.slice(0, 5);
-    
-    for (const pred of predictionsToShow) {
-      const msg = await formatPredictionMessage(pred);
-      await ctx.replyWithHTML(msg);
       await delay(500);
     }
 
-    if (predictions.length > 5) {
-      await ctx.reply(`✅ Analizzate ${predictions.length} partite totali\n📊 Mostrando le migliori ${Math.min(5, predictions.length)}`);
-    } else {
-      await ctx.reply(`✅ Analizzate ${predictions.length} partite`);
+    console.log(`   Previsioni salvate: ${predictions.length}`);
+
+    if (predictions.length === 0) {
+      await ctx.reply('❌ Nessuna previsione');
+      return;
     }
 
+    for (const pred of predictions.slice(0, 3)) {
+      await ctx.replyWithHTML(`
+⚽ <b>${pred.home_team} vs ${pred.away_team}</b>
+Previsione: <b>${pred.prediction_value}</b>
+Confidenza: <b>${pred.confidence}%</b>
+      `);
+      await delay(300);
+    }
+
+    await ctx.reply(`✅ ${predictions.length} previsioni`);
+
   } catch (error) {
-    console.error('Errore in /analyze:', error);
-    await ctx.reply('❌ Errore durante l\'analisi. Riprova tra poco.');
+    console.error('Errore /analyze:', error);
+    await ctx.reply('❌ Errore');
   }
 });
 
 bot.command('settings', async (ctx: Context) => {
   const userId = ctx.from?.id;
+  console.log(`⚙️ /settings da user ${userId}`);
 
   try {
     const { data } = await supabase
@@ -466,185 +344,50 @@ bot.command('settings', async (ctx: Context) => {
       .single();
 
     if (!data) {
-      await ctx.reply('❌ Preferenze non trovate.\n\nDigita /init per crearle');
+      console.log(`   Preferenze non trovate`);
+      await ctx.reply('❌ Digita /init');
       return;
     }
 
-    const settingsMsg = `
-⚙️ <b>LE TUE PREFERENZE</b>
-
-Paesi: ${data.countries.join(', ')}
-Leghe: ${data.leagues.join(', ')}
-Confidenza minima: ${data.min_confidence}%
-Mercati: ${data.markets_preferred.join(', ')}
-
-<b>Modifica:</b>
-/set_country Italia,Inghilterra,Spagna
-/set_league Serie A, Premier League
-/set_confidence 70
-`;
-
-    await ctx.replyWithHTML(settingsMsg);
+    console.log(`   ✅ Preferenze trovate`);
+    await ctx.reply(`Paesi: ${data.countries.join(', ')}`);
   } catch (error) {
     console.error('Errore settings:', error);
-    await ctx.reply('❌ Errore nel caricamento preferenze. Digita /init');
+    await ctx.reply('❌ Errore');
   }
-});
-
-bot.command('set_country', async (ctx: Context) => {
-  const userId = ctx.from?.id;
-  const args = (ctx.message as any)?.text?.split(' ').slice(1).join(' ');
-
-  if (!args) {
-    await ctx.reply('Uso: /set_country Italia,Inghilterra,Spagna');
-    return;
-  }
-
-  const countries = args.split(',').map((c: string) => c.trim());
-
-  try {
-    await supabase
-      .from('user_preferences')
-      .update({ countries })
-      .eq('user_id', userId);
-      
-    await ctx.reply(`✅ Paesi aggiornati:\n${countries.join(', ')}`);
-  } catch (error) {
-    await ctx.reply('❌ Errore update');
-  }
-});
-
-bot.command('set_confidence', async (ctx: Context) => {
-  const userId = ctx.from?.id;
-  const confidence = parseInt((ctx.message as any)?.text?.split(' ')[1] || '65');
-
-  if (isNaN(confidence) || confidence < 0 || confidence > 100) {
-    await ctx.reply('❌ Valore non valido. Usa numero tra 0-100');
-    return;
-  }
-
-  try {
-    await supabase
-      .from('user_preferences')
-      .update({ min_confidence: confidence })
-      .eq('user_id', userId);
-      
-    await ctx.reply(`✅ Confidenza minima impostata a ${confidence}%`);
-  } catch (error) {
-    await ctx.reply('❌ Errore update');
-  }
-});
-
-bot.command('stats', async (ctx: Context) => {
-  try {
-    const { data: predictions } = await supabase
-      .from('predictions')
-      .select('status, profit_loss, confidence')
-      .in('status', ['won', 'lost']);
-
-    const won = predictions?.filter((p: any) => p.status === 'won').length || 0;
-    const lost = predictions?.filter((p: any) => p.status === 'lost').length || 0;
-    const total = won + lost;
-    const totalProfit = predictions?.reduce((sum: number, p: any) => sum + (p.profit_loss || 0), 0) || 0;
-    const winRate = total > 0 ? ((won / total) * 100).toFixed(1) : 0;
-    const avgConfidence = predictions && predictions.length > 0 
-      ? (predictions.reduce((sum: number, p: any) => sum + p.confidence, 0) / predictions.length).toFixed(1)
-      : 0;
-
-    const statsMsg = `
-📊 <b>LE TUE STATISTICHE</b>
-
-✅ Previsioni corrette: <b>${won}</b>
-❌ Previsioni sbagliate: <b>${lost}</b>
-📈 Win Rate: <b>${winRate}%</b>
-💰 Profitto totale: <b>€${totalProfit.toFixed(2)}</b>
-
-Confidenza media: <b>${avgConfidence}%</b>
-Previsioni totali: <b>${total}</b>
-`;
-
-    await ctx.replyWithHTML(statsMsg);
-  } catch (error) {
-    console.error('Errore stats:', error);
-    await ctx.reply('❌ Errore nel caricamento statistiche');
-  }
-});
-
-bot.command('history', async (ctx: Context) => {
-  try {
-    const { data: predictions } = await supabase
-      .from('predictions')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    if (!predictions || predictions.length === 0) {
-      await ctx.reply('❌ Nessuna storia disponibile');
-      return;
-    }
-
-    let historyMsg = '<b>📈 ULTIMI 10 MATCH ANALIZZATI</b>\n\n';
-
-    predictions.forEach((pred: any, idx: number) => {
-      const status = pred.status === 'won' ? '✅' : pred.status === 'lost' ? '❌' : '⏳';
-      historyMsg += `${idx + 1}. ${status} ${pred.home_team} vs ${pred.away_team}\n`;
-      historyMsg += `   Previsione: ${pred.prediction_value} (${pred.confidence}%)\n`;
-      historyMsg += `   Stato: ${pred.status}\n\n`;
-    });
-
-    await ctx.replyWithHTML(historyMsg);
-  } catch (error) {
-    await ctx.reply('❌ Errore nel caricamento storico');
-  }
-});
-
-bot.command('markets', async (ctx: Context) => {
-  await ctx.replyWithHTML(`
-📊 <b>GUIDA MERCATI SCOMMESSE</b>
-
-<b>1X2</b> - Quote: 2.0-2.5 | Rischio: Medio
-<b>OVER/UNDER</b> - Quote: 1.9-2.1 | Rischio: Basso-Medio
-<b>BTTS</b> - Quote: 1.6-2.2 | Rischio: Medio
-<b>ASIAN HC</b> - Quote: 1.7-1.9 | Rischio: Medio-Alto
-<b>CORRECT SCORE</b> - Quote: 4.0-12.0+ | Rischio: Alto
-
-⚠️ Max 5% per scommessa!
-`);
 });
 
 bot.command('help', async (ctx: Context) => {
-  await ctx.replyWithHTML(`
-<b>🆘 COMANDI</b>
-
+  await ctx.reply(`
 /start - Inizializza
 /init - Crea preferenze
-/analyze - Analizza partite
+/analyze - Analizza
 /settings - Preferenze
-/set_country - Cambia paesi
-/set_confidence - Soglia minima
-/history - Ultimi match
-/stats - Statistiche
-/markets - Guida mercati
-/help - Questo messaggio
-`);
+/logs - Vedi logs
+  `);
+});
+
+bot.command('logs', async (ctx: Context) => {
+  const userId = ctx.from?.id;
+  console.log(`📝 /logs da user ${userId}`);
+  await ctx.reply('Vedi i log in Railway console');
 });
 
 bot.on(message(), async (ctx: Context) => {
   const text = (ctx.message as any)?.text;
   if (text && !text.startsWith('/')) {
-    await ctx.reply('❓ Comando non riconosciuto. Digita /help');
+    await ctx.reply('❓ /help');
   }
 });
 
-bot.catch((err: any, ctx: Context) => {
+bot.catch((err: any) => {
   console.error('Errore bot:', err);
-  ctx.reply('❌ Errore interno');
 });
 
 bot.launch().then(() => {
-  console.log('✅ Bot avviato con successo');
+  console.log('✅ Bot avviato');
 }).catch((err) => {
-  console.error('❌ Errore avvio bot:', err);
+  console.error('❌ Errore avvio:', err);
   process.exit(1);
 });
 

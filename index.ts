@@ -303,7 +303,7 @@ bot.command('start', async (ctx: Context) => {
       .single();
 
     if (!data) {
-      await supabase
+      const { error } = await supabase
         .from('user_preferences')
         .insert({
           user_id: userId,
@@ -312,6 +312,10 @@ bot.command('start', async (ctx: Context) => {
           min_confidence: 65,
           markets_preferred: ['1X2', 'OVER_2.5', 'BTTS']
         });
+      
+      if (error) {
+        console.error('Errore insert preferenze:', error);
+      }
     }
   } catch (error) {
     console.error('Errore start:', error);
@@ -338,6 +342,36 @@ Benvenuto! Questo bot analizza partite calcistiche usando Gemini AI.
 
 Digita /analyze per iniziare!
 `);
+});
+
+bot.command('init', async (ctx: Context) => {
+  const userId = ctx.from?.id;
+  
+  console.log(`🔧 /init comando - user_id: ${userId}`);
+  
+  try {
+    const { error } = await supabase
+      .from('user_preferences')
+      .upsert({
+        user_id: userId,
+        countries: Object.keys(COUNTRIES_LEAGUES),
+        leagues: ['italy_serie_a'],
+        min_confidence: 65,
+        markets_preferred: ['1X2', 'OVER_2.5', 'BTTS']
+      }, {
+        onConflict: 'user_id'
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    console.log(`✅ Preferenze create per user ${userId}`);
+    await ctx.reply('✅ Preferenze inizializzate!\n\nDigita /settings per vederle');
+  } catch (error) {
+    console.error('❌ Errore /init:', error);
+    await ctx.reply('❌ Errore: ' + (error instanceof Error ? error.message : 'Errore sconosciuto'));
+  }
 });
 
 bot.command('analyze', async (ctx: Context) => {
@@ -427,7 +461,7 @@ bot.command('settings', async (ctx: Context) => {
       .single();
 
     if (!data) {
-      await ctx.reply('❌ Preferenze non trovate. Digita /start');
+      await ctx.reply('❌ Preferenze non trovate.\n\nDigita /init per crearle');
       return;
     }
 
@@ -448,7 +482,7 @@ Mercati: ${data.markets_preferred.join(', ')}
     await ctx.replyWithHTML(settingsMsg);
   } catch (error) {
     console.error('Errore settings:', error);
-    await ctx.reply('❌ Errore nel caricamento preferenze');
+    await ctx.reply('❌ Errore nel caricamento preferenze. Digita /init');
   }
 });
 
@@ -563,72 +597,43 @@ bot.command('markets', async (ctx: Context) => {
   await ctx.replyWithHTML(`
 📊 <b>GUIDA MERCATI SCOMMESSE</b>
 
-<b>1X2 - Risultato Partita</b>
-Prevedi: Vittoria Casa, Pareggio o Vittoria Ospiti
-Quote: 2.0-2.5 media | Facilità: Alta | Rischio: Medio
+<b>1X2</b> - Quote: 2.0-2.5 | Rischio: Medio
+<b>OVER/UNDER</b> - Quote: 1.9-2.1 | Rischio: Basso-Medio
+<b>BTTS</b> - Quote: 1.6-2.2 | Rischio: Medio
+<b>ASIAN HC</b> - Quote: 1.7-1.9 | Rischio: Medio-Alto
+<b>CORRECT SCORE</b> - Quote: 4.0-12.0+ | Rischio: Alto
 
-<b>OVER/UNDER 2.5</b>
-Prevedi: più di 2.5 gol (Over) o meno (Under)
-Quote: 1.9-2.1 | Facilità: Alta | Rischio: Basso-Medio
-
-<b>BTTS - Entrambe Segnano</b>
-Entrambe le squadre segnano almeno un gol
-Quote: 1.6-2.2 | Facilità: Media | Rischio: Medio
-
-<b>ASIAN HANDICAP</b>
-Handicap -0.5, -1, -1.5 per favorite
-Quote: 1.7-1.9 | Facilità: Media | Rischio: Medio-Alto
-
-<b>CORRECT SCORE</b>
-Indovina esito esatto (es: 2-1)
-Quote: 4.0-12.0+ | Facilità: Bassa | Rischio: Alto
-
-⚠️ <b>Gestione Bankroll:</b>
-• Max 5% per scommessa
-• Confidence < 60% = Non scommettere
-• Usa Kelly Criterion: stake = (conf-50)/100
-• Traccia ROI continuamente
+⚠️ Max 5% per scommessa!
 `);
 });
 
 bot.command('help', async (ctx: Context) => {
   await ctx.replyWithHTML(`
-<b>🆘 GUIDA COMPLETA COMANDI</b>
+<b>🆘 COMANDI</b>
 
-<b>/start</b> - Inizializza il bot e crea profilo
-<b>/analyze</b> - Analizza partite di oggi
-<b>/settings</b> - Mostra e modifica preferenze
-<b>/set_country PAESI</b> - Es: Italia,Inghilterra,Spagna
-<b>/set_confidence N</b> - Soglia minima (0-100)
-<b>/history</b> - Ultimi 10 match analizzati
-<b>/stats</b> - Statistiche personali
-<b>/markets</b> - Guida mercati scommesse
-<b>/help</b> - Questo messaggio
-
-<b>ℹ️ Come Funziona:</b>
-1. Bot recupera partite da The-Odds-API
-2. Gemini AI analizza ogni partita
-3. Salva previsioni nel database
-4. Ti mostra risultati con confidenza
-
-<b>⚠️ Disclaimer:</b>
-Questo bot è uno strumento educativo.
-Non è un sistema di scommesse garantito.
-Analizza dati storici e trend, non il futuro.
-Gioca responsabilmente.
+/start - Inizializza
+/init - Crea preferenze
+/analyze - Analizza partite
+/settings - Preferenze
+/set_country - Cambia paesi
+/set_confidence - Soglia minima
+/history - Ultimi match
+/stats - Statistiche
+/markets - Guida mercati
+/help - Questo messaggio
 `);
 });
 
 bot.on(message(), async (ctx: Context) => {
   const text = (ctx.message as any)?.text;
   if (text && !text.startsWith('/')) {
-    await ctx.reply('❓ Comando non riconosciuto. Digita /help per i comandi disponibili.');
+    await ctx.reply('❓ Comando non riconosciuto. Digita /help');
   }
 });
 
 bot.catch((err: any, ctx: Context) => {
   console.error('Errore bot:', err);
-  ctx.reply('❌ Errore interno. Riprova dopo poco.');
+  ctx.reply('❌ Errore interno');
 });
 
 bot.launch().then(() => {

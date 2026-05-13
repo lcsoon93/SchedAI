@@ -300,7 +300,7 @@ async function analyzeWithGemini(match: Match, league: string): Promise<Predicti
 }
 
 // Salvataggio migliorato
-async function savePredictionToSupabase(prediction: Prediction, userId: number): Promise<boolean> {
+async function savePredictionToSupabase(prediction: Prediction): Promise<boolean> {
   const result = await retryAsync(async () => {
     const { error } = await supabase
       .from('predictions')

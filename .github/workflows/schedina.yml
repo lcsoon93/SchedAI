@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: 'Data da analizzare (AAAA-MM-GG, vuoto = oggi)'
+        description: 'Data da analizzare (AAAA-MM-GG, oggi o futura; vuoto = oggi)'
         required: false
 
 permissions: {}

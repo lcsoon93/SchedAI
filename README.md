@@ -30,7 +30,7 @@ Mercati: 1X2, doppia chance, Under/Over 1,5/2,5/3,5, Goal/No Goal. Parametri in 
 ## Storico
 
 - **Le mie richieste**: ogni analisi fatta dalla pagina viene salvata nel browser (tutte, non solo quelle giocate) e si può verificarne l'esito con «Aggiorna esiti».
-- **Storico ufficiale**: una GitHub Action gira ogni mattina con parametri fissi, salva la schedina di riferimento e *tutti* gli esiti analizzati e referta i risultati. Da lì vengono Brier score, log-loss, calibrazione, skill rispetto al mercato e ROI. Le richieste manuali non entrano qui, così rilanciare finché piace il risultato non falsa le statistiche. Sotto le 300 partite concluse il verdetto è «campione troppo piccolo».
+- **Storico ufficiale**: una GitHub Action gira ogni mattina con parametri fissi, salva la schedina di riferimento e *tutti* gli esiti analizzati e referta i risultati. Da lì vengono Brier score, log-loss, calibrazione, skill rispetto al mercato e ROI. Le richieste manuali non entrano qui, così rilanciare finché piace il risultato non falsa le statistiche. Una data già registrata non viene mai riscritta e non si accettano date passate. Sotto le 300 partite concluse il verdetto è «campione troppo piccolo».
 
 ## Struttura
 

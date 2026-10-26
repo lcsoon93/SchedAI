@@ -9,7 +9,6 @@
 //   API_FOOTBALL_KEY=... node scripts/generate.mjs [--date AAAA-MM-GG]
 //   node scripts/generate.mjs --mock        (dati simulati, nessuna chiamata)
 //   --out DIR   cartella di output (default site/data)
-//   --force     sostituisce nello storico la schedina già salvata per la data
 //
 // Scrive in site/data: latest.json (schedina di riferimento e statistiche),
 // history.json (schedine ed esiti), archive/AAAA-MM-GG.json e
@@ -27,7 +26,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const argValue = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const mock = args.includes('--mock');
-const force = args.includes('--force');
 const dateArg = argValue('--date');
 const DATA_DIR = resolve(argValue('--out') || join(ROOT, 'site', 'data'));
 
@@ -88,12 +86,20 @@ async function main() {
   // Storico solo-aggiunta: la prima schedina pubblicata per una data resta
   // quella valutata. Un nuovo lancio aggiorna solo esiti e statistiche.
   const archivePath = join(DATA_DIR, 'archive', `${date}.json`);
-  const published = history.days.some((d) => d.date === date) && !mock && !force && (await readJson(archivePath, null));
-  if (published) {
-    console.log(`La schedina del ${date} è già pubblicata: aggiorno solo esiti e statistiche.`);
-    published.stats = computeStats(history, candidateDays);
-    published.recent = history.days.slice(-14).reverse();
-    await writeJson(join(DATA_DIR, 'latest.json'), published);
+  // Una data già presente non si riscrive mai, e non si creano schedine per
+  // date passate: lo storico deve contenere solo previsioni fatte prima.
+  const alreadyPublished = !mock && history.days.some((d) => d.date === date);
+  const pastDate = !mock && date < todayIn(cfg.timezone);
+  if (alreadyPublished || pastDate) {
+    console.log(
+      alreadyPublished
+        ? `La schedina del ${date} è già nello storico: non la sovrascrivo, aggiorno solo esiti e statistiche.`
+        : `${date} è una data passata: lo storico ufficiale non accetta schedine create a posteriori.`
+    );
+    const latest = (await readJson(join(DATA_DIR, 'latest.json'), null)) || { date, tickets: [], status: 'nessuna_schedina' };
+    latest.stats = computeStats(history, candidateDays);
+    latest.recent = history.days.slice(-14).reverse();
+    await writeJson(join(DATA_DIR, 'latest.json'), latest);
     await writeJson(historyPath, history);
     return;
   }
@@ -102,7 +108,7 @@ async function main() {
   const { analyses, ...latest } = await runAnalysis(client, cfg, { date, bands: cfg.ticket.bands, ignoreKickoff: mock });
   console.log(`Stato: ${latest.status}, ${latest.tickets.length} schedine, ${latest.summary.fixturesAnalyzed} partite analizzate.`);
 
-  history.days = history.days.filter((d) => d.date !== date);
+  if (mock) history.days = history.days.filter((d) => d.date !== date);
   history.days.push({ date, status: latest.status, mock, tickets: latest.tickets.map(compactTicket) });
   history.days.sort((a, b) => a.date.localeCompare(b.date));
 

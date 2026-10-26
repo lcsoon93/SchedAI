@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://v3.football.api-sports.io; base-uri 'none'; form-action 'none'; object-src 'none'">
   <title>SchedAI</title>
   <meta name="description" content="Analisi del palinsesto calcistico su richiesta: probabilità stimate, valore atteso e storico verificato. Solo per maggiorenni.">
   <link rel="stylesheet" href="style.css">
@@ -44,7 +45,7 @@
 
     <section class="card" id="mine-card" hidden>
       <h2>Le mie richieste</h2>
-      <p class="hint">Salvate solo in questo browser, tutte e non solo quelle giocate. <span id="mine-summary"></span></p>
+      <p class="hint">Salvate solo in questo browser, tutte e non solo quelle giocate. Rilanciare finché la schedina convince non la rende più probabile: conta la prima analisi. <span id="mine-summary"></span></p>
       <div class="row">
         <button type="button" id="mine-refresh">Aggiorna esiti</button>
         <button type="button" id="mine-clear" class="secondary">Cancella</button>

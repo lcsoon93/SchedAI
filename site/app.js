@@ -264,12 +264,16 @@ function renderRequests() {
   $('mine-card').hidden = !list.length;
   if (!list.length) return;
 
-  const main = list.map((x) => x.tickets.find((t) => t.featured)).filter(Boolean);
+  // Nel riepilogo conta solo la prima richiesta di ogni data, così rilanciare
+  // più volte lo stesso giorno non pesa di più.
+  const firstPerDate = new Map();
+  for (const x of list) if (!firstPerDate.has(x.date)) firstPerDate.set(x.date, x);
+  const main = [...firstPerDate.values()].map((x) => x.tickets.find((t) => t.featured)).filter(Boolean);
   const closed = main.filter((t) => t.result === 'won' || t.result === 'lost');
   const won = closed.filter((t) => t.result === 'won').length;
   const expected = closed.reduce((a, t) => a + t.prob, 0);
   $('mine-summary').textContent = closed.length
-    ? `Schedine principali chiuse: ${closed.length}, vinte ${won} (attese ${expected.toFixed(1).replace('.', ',')}).`
+    ? `Prima schedina di ogni giorno: ${closed.length} chiuse, vinte ${won} (attese ${expected.toFixed(1).replace('.', ',')}).`
     : 'Nessuna schedina ancora chiusa.';
 
   $('mine').innerHTML = [...list]

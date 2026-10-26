@@ -1,0 +1,53 @@
+{
+  "timezone": "Europe/Rome",
+  "minutesBeforeKickoff": 60,
+  "maxFixturesToAnalyze": 90,
+
+  "leaguePresets": [
+    { "id": "tutti", "name": "Tutti i campionati seguiti", "leagues": [] },
+    { "id": "top5", "name": "Top 5 europei", "leagues": [135, 39, 140, 78, 61] },
+    { "id": "italia", "name": "Italia (Serie A e B)", "leagues": [135, 136] },
+    { "id": "coppe", "name": "Coppe europee", "leagues": [2, 3, 848] }
+  ],
+
+  "leagues": [
+    135, 136, 39, 40, 140, 141, 78, 79, 61, 62, 88, 94, 144, 203, 179,
+    207, 218, 119, 103, 113, 197, 106, 345, 210, 2, 3, 848, 71, 128, 253
+  ],
+
+  "sharpBookmakerId": 4,
+  "sharpWeight": 3,
+  "playableBookmakerIds": [8],
+
+  "weights": {
+    "result": { "market": 0.75, "poisson": 0.25, "api": 0 },
+    "goals": { "market": 0.75, "poisson": 0.25 }
+  },
+
+  "selection": {
+    "minOdd": 1.3,
+    "maxOdd": 4.0,
+    "minProb": 0.4,
+    "minEdge": 0.02,
+    "minMarketEdge": 0.0,
+    "fallbackMinEdge": -0.03,
+    "maxModelDisagreement": 0.12,
+    "minTeamMatchesPlayed": 3
+  },
+
+  "ticket": {
+    "minOdd": 10,
+    "maxOdd": 100,
+    "minLegs": 2,
+    "maxLegs": 10,
+    "maxPerLeague": 2,
+    "minTicketEV": 0.05,
+    "bands": [
+      { "id": "prudente", "name": "Prudente", "minOdd": 10, "maxOdd": 20 },
+      { "id": "equilibrata", "name": "Equilibrata", "minOdd": 20, "maxOdd": 50 },
+      { "id": "ambiziosa", "name": "Ambiziosa", "minOdd": 50, "maxOdd": 100 }
+    ]
+  },
+
+  "candidateDays": 120
+}

@@ -1,199 +1,56 @@
-# 🤖 BOT TELEGRAM - AI Football Predictions
+# SchedAI
 
-Bot Telegram avanzato per analisi match calcistici con AI (Gemini), previsioni, e tracking betting performance.
+Pagina web su **GitHub Pages** che analizza il palinsesto di calcio **quando vuoi**, con **API-Football**, e propone una schedina tra **quota 10 e 100** con probabilità stimata, valore atteso e quota equa per ogni esito.
 
-## ✨ Caratteristiche
+> ⚠️ Progetto di analisi statistica. Nessun esito è garantito, il gioco è vietato ai minori di 18 anni e può causare dipendenza. Telefono Verde Nazionale gioco d'azzardo: 800 558 822.
 
-✅ **Analisi AI con Gemini** - Previsioni intelligenti per match calcistici
-✅ **Multi-lega** - Analizza 50+ leghe di calcio
-✅ **Multi-paese** - Italia, Inghilterra, Spagna, Germania, Francia, Olanda, Croazia, Grecia, Svezia, Turchia, Marocco
-✅ **Mercati Vari** - 1X2, Over/Under, BTTS, Asian HC, Correct Score, etc.
-✅ **Database Supabase** - Storico di previsioni e scommesse
-✅ **Performance Tracking** - ROI, Win Rate, Statistiche personali
-✅ **Funziona da Smartphone** - Setup e gestione completamente mobile
-✅ **Caching Intelligente** - Riduce API calls
-✅ **Rate Limiting** - Gestione automatica dei limiti API
+## Come si usa
 
-## 🔧 Requisiti
+1. Apri la pagina e incolla una volta la tua chiave api-football: resta **solo nel tuo browser** (localStorage) e viene inviata solo a api-football.
+2. Scegli data (oggi + 7 giorni), campionati, fascia di quota (dentro 10–100) e numero massimo di esiti.
+3. Premi **Analizza**: la pagina scarica partite, quote e statistiche, calcola le probabilità e mostra la schedina consigliata, le alternative più rischiose e gli esiti con più valore.
 
-- **Node.js** 16+ con npm
-- **Account Telegram** (per testare il bot)
-- **Account BotFather** (@BotFather su Telegram)
-- **The-Odds-API** (theoddsapi.com - tier gratuito)
-- **Gemini API** (aistudio.google.com)
-- **Supabase** (supabase.com - progetto gratuito)
+Ogni richiesta costa circa 20–100 chiamate API (piano Pro: 7.500 al giorno). Palinsesto e quote restano in cache per 10 minuti e le statistiche delle squadre per 6 ore, quindi cambiare fascia o campionati subito dopo costa poco.
 
-## 📋 Setup Veloce (30 minuti)
+Senza chiave: `?demo` in fondo all'indirizzo usa dati simulati.
 
-### Fase 1: Ottieni le 5 credenziali
-1. **Telegram Token** → @BotFather → /newbot
-2. **The-Odds-API Key** → theoddsapi.com → Dashboard
-3. **Gemini API Key** → aistudio.google.com → API keys
-4. **Supabase URL & Key** → supabase.com → New Project → Settings
+## Il modello
 
-### Fase 2: Setup Database
-- Supabase → SQL Editor → Incolla database_setup.sql → RUN
+| Passo | Cosa fa |
+|---|---|
+| Quote pulite | Toglie il margine con il metodo di Shin (3 esiti) o proporzionale (2 esiti). Pinnacle pesa 3 volte gli altri book. |
+| Modello gol | Gol attesi dalle medie casa/trasferta (shrinkage verso 1,45/1,15 con poche partite), Poisson con correzione Dixon-Coles. |
+| Fusione | Media in log-odds: mercato 75%, Poisson 25%. La previsione di API-Football è salvata ma pesa 0. |
+| Filtri | Quote Bet365, quota 1,30–4,00, prob. ≥ 40%, vantaggio ≥ 2% **e** ≥ 0 con la sola probabilità di Pinnacle, scarto modello/mercato ≤ 12 punti, almeno 3 partite giocate, calcio d'inizio fra più di 60 minuti. |
+| Schedina | Knapsack a gruppi: max 1 esito per partita e 2 per campionato, tutto sullo stesso bookmaker. La fascia scelta è divisa in tre; in ognuna si cerca la combinazione **più probabile** con valore atteso ≥ +5%. La consigliata è la più probabile delle tre. |
+| Nessun valore | Se non esiste una schedina con valore positivo si mostra la meno sfavorevole come «solo esempio», con il consiglio di non giocare. |
 
-### Fase 3: GitHub
-- Crea repository privato "telegram-football-bot"
-- Upload file: index.ts, package.json, tsconfig.json, README.md, .gitignore
+Mercati: 1X2, doppia chance, Under/Over 1,5/2,5/3,5, Goal/No Goal. Parametri in `site/config.json`.
 
-### Fase 4: Railway Deploy
-- railway.app → Deploy from GitHub → telegram-football-bot
-- Aggiungi 5 variabili ambiente (le credenziali)
-- Deploy → Aspetta "Success"
+## Storico
 
-### Fase 5: Test
-- Telegram → @football_predictor_bot
-- /start → Benvenuto
-- /analyze → Previsioni ✅
+- **Le mie richieste**: ogni analisi fatta dalla pagina viene salvata nel browser (tutte, non solo quelle giocate) e si può verificarne l'esito con «Aggiorna esiti».
+- **Storico ufficiale**: una GitHub Action gira ogni mattina con parametri fissi, salva la schedina di riferimento e *tutti* gli esiti analizzati e referta i risultati. Da lì vengono Brier score, log-loss, calibrazione, skill rispetto al mercato e ROI. Le richieste manuali non entrano qui, così rilanciare finché piace il risultato non falsa le statistiche. La schedina di riferimento si scrive solo dalla corsa programmata (mai da un push o da un lancio manuale), una data già registrata non viene mai riscritta e non si accettano date passate. Sotto le 300 partite concluse il verdetto è «campione troppo piccolo».
 
-## 🎮 Comandi Disponibili
+## Struttura
 
+- `site/` – la pagina (HTML, CSS, `app.js`) e `config.json`
+- `site/lib/` – moduli condivisi tra pagina e Action: client API, modello, ottimizzatore, pipeline, storico, dati simulati, rendering
+- `site/data/` – storico ufficiale, scritto dalla Action
+- `scripts/generate.mjs` – corsa di riferimento giornaliera
+- `scripts/test/` – test (`npm test`)
+- `.github/workflows/schedina.yml` – pubblica la pagina a ogni push su `main` e fa la corsa giornaliera
+
+## Messa in funzione
+
+1. **Pages**: Settings → Pages → *Build and deployment* → Source: **GitHub Actions** (su un repository privato serve un piano GitHub a pagamento).
+2. **Storico ufficiale** (facoltativo): Settings → Secrets and variables → Actions → `API_FOOTBALL_KEY`. Senza secret la pagina funziona lo stesso, manca solo lo storico ufficiale.
+3. Al primo push su `main` la pagina viene pubblicata.
+
+### In locale
+
+```bash
+npm test            # test del modello
+npm run serve       # apre la pagina su http://localhost:3000 (prova con ?demo)
+npm run daily:mock  # corsa giornaliera con dati simulati in preview/data
 ```
-/start              - Inizializza bot
-/analyze            - Analizza partite di oggi
-/settings           - Mostra preferenze
-/set_country PAESI  - Modifica paesi
-/set_confidence N   - Soglia minima (0-100)
-/history            - Ultimi 10 match
-/stats              - Statistiche performance
-/markets            - Guida mercati
-/help               - Aiuto completo
-```
-
-## 📊 Mercati Scommesse
-
-| Mercato | Difficoltà | ROI Medio | Consiglio |
-|---------|-----------|----------|-----------|
-| 1X2 | Alta | -3% a +2% | Conservative |
-| Over/Under 2.5 | Alta | -2% a +5% | Balanced |
-| BTTS | Media | -5% a +15% | Aggressive |
-| Asian HC | Media | -10% a +20% | Expert |
-| Correct Score | Bassa | +50% (raro) | Selettivo |
-
-## 💰 Gestione Bankroll
-
-```
-Kelly Criterion: stake = (confidence - 50) / 100
-
-Esempio:
-- 75% confidence → 25% bankroll
-- 65% confidence → 15% bankroll
-- 55% confidence → 5% bankroll
-- < 50% → NO SCOMMESSA
-
-Massimo: 5% per scommessa
-Stop Loss: -20% mensile
-Target: +10% mensile
-```
-
-## ⚙️ Configurazione
-
-Copia i valori nel file .env (mai su GitHub):
-
-```
-TELEGRAM_BOT_TOKEN=123456789:ABCdef...
-THE_ODDS_API_KEY=sk_live_xxx...
-GEMINI_API_KEY=AIzaSy...
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_KEY=eyJhbGc...
-```
-
-## 🗄️ Database Supabase
-
-**Tabelle create automaticamente:**
-
-1. **predictions** - Previsioni per ogni match
-2. **user_preferences** - Preferenze personali
-3. **betting_history** - Storico scommesse
-4. **performance_stats** - View con statistiche
-
-## 🚀 Deployment
-
-### Railway (Consigliato)
-- Hosting sempre online
-- Free tier: 500 ore/mese
-- Auto-deploy da GitHub
-- Easy monitoring
-
-### Render (Alternativa)
-- Interface semplice
-- Free tier con sleep
-- Buono per development
-
-## 🐛 Troubleshooting
-
-### Bot non risponde
-```
-1. Railway → Deployments → View Logs
-2. Cerca "ERROR"
-3. Token scaduto? → @BotFather → /token
-```
-
-### Supabase connection error
-```
-1. Verifica SUPABASE_URL e KEY (niente spazi)
-2. Ricopia da Supabase
-3. Aggiorna su Railway
-```
-
-### Gemini timeout
-```
-Riprova tra 1 minuto
-```
-
-## 📚 Documentazione
-
-- [Telegraf Docs](https://telegraf.js.org/)
-- [The-Odds-API Docs](https://the-odds-api.com/)
-- [Gemini API Docs](https://ai.google.dev/)
-- [Supabase Docs](https://supabase.com/docs)
-
-## ⚠️ DISCLAIMER IMPORTANTE
-
-```
-⚠️ LEGGI PRIMA DI USARE
-
-1. QUESTO BOT NON GARANTISCE PROFITTI
-   - Usa AI generativa, non dati completi
-   - Le previsioni sono SUGGERIMENTI
-   - Le scommesse comportano RISCHIO TOTALE
-
-2. USA RESPONSABILMENTE
-   - Gioca SOLO ciò che puoi perdere
-   - Imposta limiti mensili
-   - Traccia SEMPRE il bankroll
-
-3. CONSULTA ESPERTI
-   - Non seguire ciecamente il bot
-   - Verifica dati da più fonti
-
-4. CONFORMITÀ LEGALE
-   - Scommesse NON legali ovunque
-   - Verifica leggi locali
-```
-
-## 📞 Support
-
-- GitHub Issues per problemi tecnici
-- Telegram per feedback
-- TIPS.md per strategie avanzate
-
-## 📄 Licenza
-
-MIT License
-
-## 🙏 Credits
-
-- Telegraf.js
-- The-Odds-API
-- Google Generative AI
-- Supabase
-
----
-
-**Creato con ❤️ per gli appassionati di calcio**
-
-Buona fortuna! 🍀
-

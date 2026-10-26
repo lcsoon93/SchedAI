@@ -1,4 +1,68 @@
-# 🤖 BOT TELEGRAM - AI Football Predictions
+# SchedAI · La schedina del giorno
+
+Pagina statica su **GitHub Pages** che ogni mattina analizza il palinsesto di calcio con **API-Football (piano Pro)** e pubblica una schedina tra **quota 10 e 100**, con probabilità stimata, valore atteso e uno storico verificato dei risultati.
+
+> ⚠️ Progetto di analisi statistica. Nessun esito è garantito, il gioco è vietato ai minori di 18 anni e può causare dipendenza. Telefono Verde Nazionale gioco d'azzardo: 800 558 822.
+
+## Come funziona
+
+```
+GitHub Action (ogni giorno 06:30 UTC)
+  └─ scripts/generate.mjs  ← API_FOOTBALL_KEY dai GitHub Secrets
+       1. verifica gli esiti dei giorni precedenti
+       2. scarica partite + quote + previsioni del giorno
+       3. stima le probabilità e costruisce le schedine
+       4. scrive site/data/*.json e li committa (storico)
+  └─ pubblica la cartella site/ su GitHub Pages
+```
+
+La chiave API non lascia mai la Action: la pagina legge solo JSON statici.
+
+### Il modello
+
+| Passo | Cosa fa |
+|---|---|
+| Quote pulite | Toglie il margine con il metodo di Shin (3 esiti) o proporzionale (2 esiti). Pinnacle pesa 3 volte gli altri book. |
+| Modello gol | Gol attesi dalle medie casa/trasferta (shrinkage verso 1,45/1,15 con poche partite), Poisson con correzione Dixon-Coles. |
+| Previsione API | Percentuali 1X2 di API-Football, usate solo per 1X2 e doppia chance. |
+| Fusione | Media pesata in log-odds: mercato 70%, il resto ai modelli (`schedina.config.json`). |
+| Filtri | Quota 1,30–4,00, prob. ≥ 40%, vantaggio ≥ 2%, scarto modello/mercato ≤ 12 punti, almeno 3 partite giocate. |
+| Schedina | Knapsack a gruppi: max 1 esito per partita e 2 per campionato; per ogni fascia (10–20, 20–50, 50–100) la combinazione **più probabile** con valore atteso ≥ +5%. |
+| Nessun valore | Se non esiste una schedina con valore positivo, si pubblica la meno sfavorevole con stato `valore_negativo` e la pagina dice di non giocarla. |
+| Verifica | Si salvano schedine e **tutti** gli esiti analizzati; ogni giorno si refertano e si calcolano Brier, log-loss, calibrazione, skill vs mercato, ROI e z-score. Sotto 300 esiti chiusi il verdetto è «campione troppo piccolo». |
+
+Mercati: 1X2, doppia chance, Under/Over 1,5/2,5/3,5, Goal/No Goal.
+
+### File
+
+- `scripts/generate.mjs` – pipeline giornaliera
+- `scripts/lib/` – client API, modello, ottimizzatore, storico, dati simulati
+- `scripts/test/` – test (`npm test`)
+- `schedina.config.json` – campionati, pesi, soglie, fasce di quota
+- `site/` – pagina statica; `site/data/` è scritto dalla Action
+- `.github/workflows/schedina.yml` – esecuzione giornaliera e deploy
+
+## Messa in funzione
+
+1. **Secret**: Settings → Secrets and variables → Actions → *New repository secret* → `API_FOOTBALL_KEY` = la tua chiave di api-football (dashboard.api-football.com).
+2. **Pages**: Settings → Pages → *Build and deployment* → Source: **GitHub Actions**.
+   Su un repository privato GitHub Pages richiede un piano a pagamento (Pro/Team); in alternativa rendi pubblico il repository (prima ruota le chiavi presenti nella storia git del vecchio bot).
+3. **Prima esecuzione**: Actions → *Schedina del giorno* → *Run workflow*.
+
+Consumo tipico: 1 richiesta per il palinsesto, ~5–30 per le quote, 1 per partita analizzata (max 90) e qualche richiesta per i risultati: ben sotto il limite giornaliero del piano Pro.
+
+### Provare in locale
+
+```bash
+npm test                       # test del modello
+npm run schedina:mock          # dati simulati in preview/data
+cp site/*.* preview/ && npx serve preview
+API_FOOTBALL_KEY=... node scripts/generate.mjs --date 2026-10-27 --out preview/data
+```
+
+---
+
+# (Legacy) Bot Telegram
 
 Bot Telegram avanzato per analisi match calcistici con AI (Gemini), previsioni, e tracking betting performance.
 

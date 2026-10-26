@@ -10,7 +10,9 @@
     "build": "tsc",
     "build:watch": "tsc --watch",
     "lint": "eslint . --ext .ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test 'scripts/test/*.test.mjs'",
+    "schedina": "node scripts/generate.mjs",
+    "schedina:mock": "node scripts/generate.mjs --mock --out preview/data"
   },
   "keywords": [
     "telegram",

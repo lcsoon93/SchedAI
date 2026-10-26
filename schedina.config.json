@@ -1,0 +1,43 @@
+{
+  "timezone": "Europe/Rome",
+  "minutesBeforeKickoff": 60,
+  "maxFixturesToAnalyze": 90,
+
+  "leagues": [
+    135, 136, 39, 40, 140, 141, 78, 79, 61, 62, 88, 94, 144, 203, 179,
+    207, 218, 119, 103, 113, 197, 106, 345, 210, 2, 3, 848, 71, 128, 253
+  ],
+
+  "sharpBookmakerId": 4,
+  "sharpWeight": 3,
+  "preferredBookmakerId": 8,
+
+  "weights": {
+    "result": { "market": 0.7, "poisson": 0.18, "api": 0.12 },
+    "goals": { "market": 0.7, "poisson": 0.3 }
+  },
+
+  "selection": {
+    "minOdd": 1.3,
+    "maxOdd": 4.0,
+    "minProb": 0.4,
+    "minEdge": 0.02,
+    "fallbackMinEdge": -0.03,
+    "maxModelDisagreement": 0.12,
+    "minTeamMatchesPlayed": 3
+  },
+
+  "ticket": {
+    "minLegs": 2,
+    "maxLegs": 10,
+    "maxPerLeague": 2,
+    "minTicketEV": 0.05,
+    "bands": [
+      { "id": "prudente", "name": "Prudente", "minOdd": 10, "maxOdd": 20 },
+      { "id": "equilibrata", "name": "Equilibrata", "minOdd": 20, "maxOdd": 50 },
+      { "id": "ambiziosa", "name": "Ambiziosa", "minOdd": 50, "maxOdd": 100 }
+    ]
+  },
+
+  "historyDays": 120
+}

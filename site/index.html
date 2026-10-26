@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SchedAI · La schedina del giorno</title>
+  <meta name="description" content="Analisi quotidiana del palinsesto calcistico: probabilità stimate, valore atteso e storico verificato. Solo per maggiorenni.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="age-banner" role="note">
+    <strong>18+</strong> Il gioco è vietato ai minori e può causare dipendenza. Nessun esito è garantito.
+    <a href="#gioco-responsabile">Gioco responsabile</a>
+  </div>
+
+  <header class="wrap">
+    <h1>SchedAI</h1>
+    <p class="sub">La schedina del giorno, con le probabilità dichiarate e lo storico verificato.</p>
+    <p class="meta" id="meta">Caricamento…</p>
+  </header>
+
+  <main class="wrap">
+    <div id="status"></div>
+
+    <section id="tickets" aria-label="Schedine del giorno"></section>
+
+    <section class="card" id="how-to-read">
+      <h2>Come leggere la schedina</h2>
+      <dl class="glossary">
+        <dt>Probabilità stimata</dt>
+        <dd>Quanto spesso, secondo il modello, la schedina risulta vincente. «Circa 1 volta su N» è lo stesso numero detto in modo diretto.</dd>
+        <dt>Quota equa</dt>
+        <dd>1 / probabilità stimata. Se la quota del bookmaker è più alta della quota equa, l'esito ha valore.</dd>
+        <dt>Vantaggio (edge)</dt>
+        <dd>Probabilità × quota − 1. Positivo vuol dire che, secondo il modello, a lungo andare l'esito restituisce più di quanto costa.</dd>
+        <dt>Valore atteso della schedina</dt>
+        <dd>Quanto si guadagnerebbe o perderebbe in media per ogni euro giocato, se le stime fossero corrette. È una media su molte giocate: la singola schedina si perde quasi sempre.</dd>
+      </dl>
+    </section>
+
+    <section class="card" id="shortlist-card">
+      <h2>Esiti con più valore oggi</h2>
+      <p class="hint">Tutti gli esiti giocabili, ordinati per vantaggio stimato. Una sola scelta per partita entra in schedina.</p>
+      <div class="table-scroll"><table id="shortlist"></table></div>
+    </section>
+
+    <section class="card" id="stats-card">
+      <h2>Come sta andando</h2>
+      <p id="verdict" class="verdict"></p>
+      <div id="stats"></div>
+    </section>
+
+    <section class="card" id="recent-card">
+      <h2>Ultimi giorni</h2>
+      <div id="recent"></div>
+    </section>
+
+    <section class="card" id="method">
+      <h2>Come funziona</h2>
+      <ol>
+        <li><strong>Palinsesto.</strong> Ogni mattina una GitHub Action scarica da API-Football le partite del giorno dei campionati seguiti, con le quote pre-match di tutti i bookmaker disponibili.</li>
+        <li><strong>Quote pulite.</strong> Dalle quote si toglie il margine del bookmaker con il metodo di Shin. Pinnacle, il bookmaker più efficiente, pesa di più.</li>
+        <li><strong>Modello dei gol.</strong> Dalle medie stagionali casa/trasferta si stimano i gol attesi e una distribuzione Poisson con correzione Dixon-Coles, da cui si ricavano 1X2, doppia chance, Under/Over e Goal/No Goal.</li>
+        <li><strong>Stima finale.</strong> Mercato (70%), modello dei gol e previsione di API-Football vengono fusi in log-odds. Gli esiti su cui modello e mercato divergono troppo vengono scartati: di solito è il mercato a sapere qualcosa (infortuni, formazioni).</li>
+        <li><strong>Selezione.</strong> Entrano solo esiti con quota 1,30–4,00 e vantaggio di almeno il 2%. Massimo un esito per partita (per non sommare eventi correlati) e due per campionato.</li>
+        <li><strong>Schedina.</strong> Per ogni fascia di quota (10–20, 20–50, 50–100) si cerca la combinazione <em>più probabile</em> con valore atteso di almeno +5%. A parità di fascia vince la combinazione con meno rischio, non quella con la quota più alta.</li>
+        <li><strong>Verifica.</strong> Ogni giorno si salvano schedine e tutti gli esiti analizzati, si refertano i risultati e si misurano Brier score, log-loss e calibrazione contro il mercato. Finché il campione è piccolo la pagina lo dice.</li>
+      </ol>
+    </section>
+
+    <section class="card warn" id="gioco-responsabile">
+      <h2>Gioco responsabile</h2>
+      <p>Questo sito è un esperimento di analisi statistica, non un servizio di consulenza e non un invito a scommettere. Le probabilità sono stime e possono essere sbagliate; <strong>nessun risultato è garantito</strong> e anche una schedina con valore atteso positivo si perde nella grande maggioranza dei casi.</p>
+      <ul>
+        <li>Il gioco con vincita in denaro è vietato ai minori di 18 anni.</li>
+        <li>Gioca solo con operatori autorizzati ADM e solo somme che puoi permetterti di perdere.</li>
+        <li>Fissa un limite di spesa e di tempo e non inseguire le perdite.</li>
+        <li>Se il gioco smette di essere un divertimento, chiedi aiuto: <strong>Telefono Verde Nazionale per le problematiche legate al gioco d'azzardo 800 558 822</strong> (Istituto Superiore di Sanità, anonimo e gratuito).</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <p>Dati: API-Football. Pagina statica generata automaticamente; nessun dato personale raccolto.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -73,6 +73,9 @@ main > *, #tickets > * { min-width: 0; }
   padding: 18px;
 }
 .card.warn { border-color: var(--warn); }
+.ticket.featured { border: 2px solid var(--accent); }
+.alternatives summary { cursor: pointer; }
+.alternatives .alt { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
 
 .banner {
   border-radius: var(--radius);
@@ -80,7 +83,7 @@ main > *, #tickets > * { min-width: 0; }
   border: 1px solid;
 }
 .banner.ok { background: var(--accent-soft); border-color: var(--accent); }
-.banner.neg { background: var(--warn-soft); border-color: var(--warn); }
+.banner.caution { background: var(--warn-soft); border-color: var(--warn); }
 .banner.none { background: var(--bad-soft); border-color: var(--bad); }
 .banner p { margin: 4px 0 0; }
 

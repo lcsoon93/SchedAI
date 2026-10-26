@@ -35,6 +35,8 @@
         <dd>Probabilità × quota − 1. Positivo vuol dire che, secondo il modello, a lungo andare l'esito restituisce più di quanto costa.</dd>
         <dt>Valore atteso della schedina</dt>
         <dd>Quanto si guadagnerebbe o perderebbe in media per ogni euro giocato, se le stime fossero corrette. È una media su molte giocate: la singola schedina si perde quasi sempre.</dd>
+        <dt>Valore atteso (solo mercato)</dt>
+        <dd>Lo stesso calcolo usando solo le quote pulite di Pinnacle, senza il nostro modello: è la stima prudente. Se è negativo, il vantaggio dipende tutto dal modello.</dd>
       </dl>
     </section>
 
@@ -61,9 +63,9 @@
         <li><strong>Palinsesto.</strong> Ogni mattina una GitHub Action scarica da API-Football le partite del giorno dei campionati seguiti, con le quote pre-match di tutti i bookmaker disponibili.</li>
         <li><strong>Quote pulite.</strong> Dalle quote si toglie il margine del bookmaker con il metodo di Shin. Pinnacle, il bookmaker più efficiente, pesa di più.</li>
         <li><strong>Modello dei gol.</strong> Dalle medie stagionali casa/trasferta si stimano i gol attesi e una distribuzione Poisson con correzione Dixon-Coles, da cui si ricavano 1X2, doppia chance, Under/Over e Goal/No Goal.</li>
-        <li><strong>Stima finale.</strong> Mercato (70%), modello dei gol e previsione di API-Football vengono fusi in log-odds. Gli esiti su cui modello e mercato divergono troppo vengono scartati: di solito è il mercato a sapere qualcosa (infortuni, formazioni).</li>
-        <li><strong>Selezione.</strong> Entrano solo esiti con quota 1,30–4,00 e vantaggio di almeno il 2%. Massimo un esito per partita (per non sommare eventi correlati) e due per campionato.</li>
-        <li><strong>Schedina.</strong> Per ogni fascia di quota (10–20, 20–50, 50–100) si cerca la combinazione <em>più probabile</em> con valore atteso di almeno +5%. A parità di fascia vince la combinazione con meno rischio, non quella con la quota più alta.</li>
+        <li><strong>Stima finale.</strong> Mercato (75%) e modello dei gol (25%) vengono fusi in log-odds; la previsione di API-Football viene salvata ma per ora pesa zero. Gli esiti su cui modello e mercato divergono troppo vengono scartati: di solito è il mercato a sapere qualcosa (infortuni, formazioni).</li>
+        <li><strong>Selezione.</strong> La quota giocabile è la migliore tra Bet365, Bwin, William Hill, Unibet e Betfair. Entrano solo esiti con quota 1,30–4,00, vantaggio stimato di almeno il 2% e vantaggio positivo anche secondo le sole quote di Pinnacle: il valore deve venire dal confronto tra bookmaker, non solo dal modello. Massimo un esito per partita (per non sommare eventi correlati) e due per campionato.</li>
+        <li><strong>Schedina.</strong> Per ogni fascia di quota (10–20, 20–50, 50–100) si cerca la combinazione <em>più probabile</em> con valore atteso di almeno +5%. La schedina del giorno è la più probabile tra queste; le altre restano come alternative più rischiose.</li>
         <li><strong>Verifica.</strong> Ogni giorno si salvano schedine e tutti gli esiti analizzati, si refertano i risultati e si misurano Brier score, log-loss e calibrazione contro il mercato. Finché il campione è piccolo la pagina lo dice.</li>
       </ol>
     </section>

@@ -10,11 +10,11 @@
 
   "sharpBookmakerId": 4,
   "sharpWeight": 3,
-  "preferredBookmakerId": 8,
+  "playableBookmakerIds": [8, 6, 7, 16, 3],
 
   "weights": {
-    "result": { "market": 0.7, "poisson": 0.18, "api": 0.12 },
-    "goals": { "market": 0.7, "poisson": 0.3 }
+    "result": { "market": 0.75, "poisson": 0.25, "api": 0 },
+    "goals": { "market": 0.75, "poisson": 0.25 }
   },
 
   "selection": {
@@ -22,6 +22,7 @@
     "maxOdd": 4.0,
     "minProb": 0.4,
     "minEdge": 0.02,
+    "minMarketEdge": 0.0,
     "fallbackMinEdge": -0.03,
     "maxModelDisagreement": 0.12,
     "minTeamMatchesPlayed": 3

@@ -4,6 +4,7 @@
 //   API_FOOTBALL_KEY=... node scripts/generate.mjs [--date AAAA-MM-GG]
 //   node scripts/generate.mjs --mock        (dati simulati, nessuna chiamata)
 //   --out DIR   cartella di output (default site/data)
+//   --force     sostituisce nello storico la schedina già salvata per la data
 //
 // Scrive in site/data: latest.json (letto dalla pagina), history.json
 // (schedine ed esiti), archive/AAAA-MM-GG.json (copia del giorno) e
@@ -23,6 +24,7 @@ const args = process.argv.slice(2);
 const argValue = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const mock = args.includes('--mock');
 const dateArg = argValue('--date');
+const force = args.includes('--force');
 const DATA_DIR = resolve(argValue('--out') || join(ROOT, 'site', 'data'));
 
 async function readJson(path, fallback) {
@@ -42,10 +44,10 @@ function todayIn(timeZone) {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
-function makeTickets(analyses, cfg, minEdge, minTicketEV) {
+function makeTickets(analyses, cfg, minEdge, minMarketEdge, minTicketEV) {
   const groups = analyses
     .map((a) =>
-      eligibleOptions(a, cfg.selection, minEdge).map((o) => ({
+      eligibleOptions(a, cfg.selection, minEdge, minMarketEdge).map((o) => ({
         ...o,
         fixtureId: a.fixtureId,
         kickoff: a.kickoff,
@@ -81,6 +83,7 @@ function makeTickets(analyses, cfg, minEdge, minTicketEV) {
       totalOdd: t.totalOdd,
       prob: t.prob,
       probMarket: t.legs.reduce((a, l) => a * l.pMarket, 1),
+      evMarket: t.legs.reduce((a, l) => a * l.pMarket, 1) * t.totalOdd - 1,
       ev: t.ev,
       oneIn: Math.round(1 / t.prob),
       legs: t.legs.map((l) => ({ ...l, fairOdd: Math.round((100 / l.p)) / 100 })),
@@ -126,6 +129,19 @@ async function main() {
   await settleAll(history, candidateDays, client);
   for (const d of candidateDays) await writeJson(join(candDir, `${d.date}.json`), d, true);
 
+  // Storico solo-aggiunta: la prima schedina pubblicata per una data resta
+  // quella valutata. Un nuovo lancio aggiorna solo esiti e statistiche.
+  const archivePath = join(DATA_DIR, 'archive', `${date}.json`);
+  const published = history.days.some((d) => d.date === date) && !mock && !force && (await readJson(archivePath, null));
+  if (published) {
+    console.log(`La schedina del ${date} è già pubblicata: aggiorno solo esiti e statistiche.`);
+    published.stats = computeStats(history, candidateDays);
+    published.recent = history.days.slice(-14).reverse();
+    await writeJson(join(DATA_DIR, 'latest.json'), published);
+    await writeJson(historyPath, history);
+    return;
+  }
+
   console.log(`Palinsesto del ${date} (${cfg.timezone})...`);
   const fixturesBody = await client.get('/fixtures', { date, timezone: cfg.timezone });
   const allFixtures = fixturesBody.response || [];
@@ -161,15 +177,17 @@ async function main() {
   }
 
   let status = 'valore_positivo';
-  let { tickets, candidates } = makeTickets(analyses, cfg, cfg.selection.minEdge, cfg.ticket.minTicketEV);
+  let { tickets, candidates } = makeTickets(analyses, cfg, cfg.selection.minEdge, cfg.selection.minMarketEdge, cfg.ticket.minTicketEV);
   if (!tickets.length) {
     status = 'valore_negativo';
-    ({ tickets, candidates } = makeTickets(analyses, cfg, cfg.selection.fallbackMinEdge, null));
+    ({ tickets, candidates } = makeTickets(analyses, cfg, cfg.selection.fallbackMinEdge, null, null));
   }
   if (!tickets.length) status = 'nessuna_schedina';
+  // La schedina del giorno è la più probabile; le altre fasce sono alternative.
+  tickets.sort((a, b) => b.prob - a.prob);
+  tickets.forEach((t, i) => (t.featured = i === 0));
   console.log(`Stato: ${status}, ${tickets.length} schedine, ${candidates.length} esiti candidati.`);
 
-  // Storico: una voce per giorno, sostituita se si rigenera la stessa data.
   history.days = history.days.filter((d) => d.date !== date);
   history.days.push({
     date,
@@ -178,6 +196,7 @@ async function main() {
     tickets: tickets.map((t) => ({
       band: t.band,
       name: t.name,
+      featured: t.featured,
       totalOdd: t.totalOdd,
       prob: t.prob,
       probMarket: t.probMarket,
@@ -220,14 +239,24 @@ async function main() {
   };
 
   await writeJson(join(DATA_DIR, 'latest.json'), latest);
-  await writeJson(join(DATA_DIR, 'archive', `${date}.json`), latest);
+  await writeJson(archivePath, latest);
   await writeJson(historyPath, history);
-  // Formato compatto: f=fixture, k=esito, p=modello, m=mercato, o=quota, r=risultato.
+  // Formato compatto: f=fixture, k=esito, p=stima finale, m=mercato, g=Poisson,
+  // a=API-Football, o=quota, r=risultato. g e a servono a ricalibrare i pesi.
   await writeJson(join(candDir, `${date}.json`), {
     date,
     mock,
     rows: analyses.flatMap((a) =>
-      a.options.map((o) => ({ f: a.fixtureId, k: o.key, p: +o.p.toFixed(4), m: +o.pMarket.toFixed(4), o: o.odd, r: null }))
+      a.options.map((o) => ({
+        f: a.fixtureId,
+        k: o.key,
+        p: +o.p.toFixed(4),
+        m: +o.pMarket.toFixed(4),
+        g: o.pPoisson == null ? null : +o.pPoisson.toFixed(4),
+        a: o.pApi == null ? null : +o.pApi.toFixed(4),
+        o: o.odd,
+        r: null,
+      }))
     ),
   }, true);
   console.log(`Fatto. Chiamate API usate: ${client.calls}.`);

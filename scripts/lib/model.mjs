@@ -6,8 +6,11 @@
 //      maggiore al bookmaker "sharp" (Pinnacle).
 //   2. Poisson / Dixon-Coles: gol attesi stimati dalle medie stagionali
 //      casa/trasferta delle due squadre, con shrinkage verso la media.
-//   3. Previsione di API-Football (solo per gli esiti 1X2 / doppia chance).
+//   3. Previsione di API-Football (solo per gli esiti 1X2 / doppia chance;
+//      peso 0 di default, salvata per ricalibrare i pesi sullo storico).
 // La stima finale è una media pesata in log-odds; l'edge è p * quota - 1.
+// Un esito è giocabile solo se ha edge positivo anche con la sola
+// probabilità di mercato, cioè se la migliore quota giocabile batte Pinnacle.
 
 const LINES = [1.5, 2.5, 3.5];
 const MAX_GOALS = 10;
@@ -61,12 +64,6 @@ export function parseBookmakers(oddsEntry) {
   return books;
 }
 
-function median(xs) {
-  const s = [...xs].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-
 // Metodo di Shin: corregge il favourite-longshot bias togliendo più margine
 // alle quote alte. Per due esiti coincide di fatto con la normalizzazione.
 export function shinProbs(odds) {
@@ -118,13 +115,15 @@ export function marketProbabilities(books, cfg) {
   return out;
 }
 
-// Quota giocabile: quella del bookmaker preferito, altrimenti la mediana.
+// Quota giocabile: la migliore tra i bookmaker dove si può davvero giocare
+// (line shopping). Pinnacle serve solo da riferimento per le probabilità.
 export function offeredOdd(books, key, cfg) {
-  const pref = books[cfg.preferredBookmakerId]?.picks[key];
-  if (pref) return { odd: pref, bookmaker: books[cfg.preferredBookmakerId].name };
-  const all = Object.values(books).map((b) => b.picks[key]).filter(Boolean);
-  if (!all.length) return null;
-  return { odd: Math.round(median(all) * 100) / 100, bookmaker: `mediana di ${all.length} book` };
+  let best = null;
+  for (const id of cfg.playableBookmakerIds) {
+    const odd = books[id]?.picks[key];
+    if (odd && (!best || odd > best.odd)) best = { odd, bookmaker: books[id].name };
+  }
+  return best;
 }
 
 function num(x) {
@@ -281,6 +280,7 @@ export function analyzeFixture(fx, oddsEntry, prediction, cfg) {
       pPoisson: pP ?? null,
       pApi: pA ?? null,
       edge: p * offer.odd - 1,
+      edgeMarket: pM * offer.odd - 1,
       reasons,
     });
   }
@@ -303,11 +303,14 @@ export function analyzeFixture(fx, oddsEntry, prediction, cfg) {
 }
 
 // Filtra gli esiti giocabili secondo le soglie di configurazione.
-export function eligibleOptions(analysis, sel, minEdge) {
+export function eligibleOptions(analysis, sel, minEdge, minMarketEdge = null) {
   return analysis.options.filter((o) => {
     if (o.odd < sel.minOdd || o.odd > sel.maxOdd) return false;
     if (o.p < sel.minProb) return false;
     if (o.edge < minEdge) return false;
+    // Il valore deve esistere anche secondo il solo mercato pulito: così
+    // un errore del modello dei gol non basta a creare un edge.
+    if (minMarketEdge !== null && o.edgeMarket < minMarketEdge) return false;
     if (o.pPoisson !== null && Math.abs(o.pPoisson - o.pMarket) > sel.maxModelDisagreement) return false;
     return true;
   });

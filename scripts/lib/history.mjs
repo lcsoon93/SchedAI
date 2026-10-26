@@ -61,6 +61,7 @@ export async function settleAll(history, candidateDays, client) {
 function settleTicket(t) {
   const results = t.legs.map((l) => l.result);
   if (results.includes('lost')) t.result = 'lost';
+  else if (results.every((r) => r === 'void')) t.result = 'void'; // posta restituita
   else if (results.every((r) => r === 'won' || r === 'void')) {
     t.result = 'won';
     t.settledOdd = Math.round(t.legs.reduce((a, l) => a * (l.result === 'void' ? 1 : l.odd), 1) * 100) / 100;
@@ -70,7 +71,9 @@ function settleTicket(t) {
 // Metriche pubblicate nella sezione "Affidabilità" della pagina.
 // Brier e log-loss: più bassi = previsioni migliori. Lo skill vs mercato è
 // 1 - Brier(modello) / Brier(mercato): > 0 significa che battiamo le quote.
-const MIN_LEGS_FOR_VERDICT = 300;
+// La soglia conta le partite distinte: gli esiti della stessa partita sono
+// correlati e non valgono come osservazioni indipendenti.
+const MIN_MATCHES_FOR_VERDICT = 300;
 
 function brier(pairs) {
   return pairs.reduce((a, [p, y]) => a + (p - y) ** 2, 0) / pairs.length;
@@ -98,34 +101,43 @@ function calibration(pairs, bins = 10) {
 }
 
 function verdict(n, skill) {
-  if (n < MIN_LEGS_FOR_VERDICT) {
-    return `Campione troppo piccolo (${n} esiti chiusi): servono almeno ${MIN_LEGS_FOR_VERDICT} esiti prima di giudicare il modello.`;
+  if (n < MIN_MATCHES_FOR_VERDICT) {
+    return `Campione troppo piccolo (${n} partite concluse): servono almeno ${MIN_MATCHES_FOR_VERDICT} partite prima di giudicare il modello.`;
   }
   if (skill > 0.01) return 'Il modello batte le quote pulite del mercato: il vantaggio è misurabile.';
   if (skill > -0.01) return 'Il modello è pari al mercato: nessun vantaggio dimostrato.';
   return 'Il modello è peggiore del mercato: meglio abbassare il peso del modello e fidarsi delle quote.';
 }
 
+const newBand = (name) => ({ name, played: 0, won: 0, expectedWins: 0, staked: 0, returned: 0 });
+
 export function computeStats(history, candidateDays = []) {
   const bands = {};
+  const featured = {};
   const legPairs = [];
   const marketPairs = [];
   let wins = 0, expected = 0, variance = 0, closed = 0;
 
   for (const day of history.days) {
     for (const t of day.tickets) {
-      const s = (bands[t.band] ||= { name: t.name, played: 0, won: 0, expectedWins: 0, staked: 0, returned: 0 });
-      if (t.result) {
-        s.played++;
-        s.staked += 1;
-        s.expectedWins += t.prob;
-        closed++;
-        expected += t.prob;
-        variance += t.prob * (1 - t.prob);
-        if (t.result === 'won') {
-          s.won++;
-          wins++;
-          s.returned += t.settledOdd;
+      if (t.result === 'won' || t.result === 'lost') {
+        // La schedina del giorno ha la sua riga, in cima, oltre a quella della fascia.
+        const rows = [(bands[t.band] ||= newBand(t.name))];
+        if (t.featured) rows.push((featured.row ||= newBand('Schedina del giorno')));
+        for (const s of rows) {
+          s.played++;
+          s.staked += 1;
+          s.expectedWins += t.prob;
+          if (t.result === 'won') {
+            s.won++;
+            s.returned += t.settledOdd;
+          }
+        }
+        if (t.featured) {
+          closed++;
+          expected += t.prob;
+          variance += t.prob * (1 - t.prob);
+          if (t.result === 'won') wins++;
         }
       }
       for (const leg of t.legs) {
@@ -137,15 +149,19 @@ export function computeStats(history, candidateDays = []) {
     }
   }
 
-  for (const s of Object.values(bands)) s.roi = s.staked ? s.returned / s.staked - 1 : null;
+  const allBands = featured.row ? { giorno: featured.row, ...bands } : bands;
+  for (const s of Object.values(allBands)) s.roi = s.staked ? s.returned / s.staked - 1 : null;
 
-  const out = { ticketsClosed: closed, legsClosed: legPairs.length, bands };
+  // ticketsClosed e z-score si riferiscono alla sola schedina del giorno.
+  const out = { ticketsClosed: closed, legsClosed: legPairs.length, bands: allBands };
 
   // Calibrazione su tutti gli esiti analizzati (non solo quelli giocati).
   const allModel = [], allMarket = [];
+  const matches = new Set();
   for (const day of candidateDays) {
     for (const c of day.rows) {
       if (c.r !== 'won' && c.r !== 'lost') continue;
+      matches.add(c.f);
       const y = c.r === 'won' ? 1 : 0;
       allModel.push([c.p, y]);
       allMarket.push([c.m, y]);
@@ -155,6 +171,7 @@ export function computeStats(history, candidateDays = []) {
     const bm = brier(allModel), bk = brier(allMarket);
     out.allCandidates = {
       n: allModel.length,
+      matches: matches.size,
       brierModel: bm,
       brierMarket: bk,
       skillVsMarket: 1 - bm / bk,
@@ -181,7 +198,7 @@ export function computeStats(history, candidateDays = []) {
       calibration: calibration(legPairs),
     };
   }
-  if (out.allCandidates) out.verdict = verdict(out.allCandidates.n, out.allCandidates.skillVsMarket);
+  if (out.allCandidates) out.verdict = verdict(out.allCandidates.matches, out.allCandidates.skillVsMarket);
   else out.verdict = 'Nessuna selezione ancora chiusa: lo storico si riempie giorno dopo giorno.';
   return out;
 }

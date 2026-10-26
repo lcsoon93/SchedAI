@@ -22,7 +22,7 @@
       html = `<div class="banner ok"><strong>Oggi il modello trova valore.</strong>
         <p>Le schedine sotto hanno valore atteso stimato positivo. Restano scommesse ad alto rischio: guarda la probabilità, non solo la quota.</p></div>`;
     } else if (s === 'valore_negativo') {
-      html = `<div class="banner neg"><strong>Oggi nessuna combinazione ha valore atteso positivo.</strong>
+      html = `<div class="banner caution"><strong>Oggi nessuna combinazione ha valore atteso positivo.</strong>
         <p>Le schedine sotto sono le meno sfavorevoli trovate, pubblicate per trasparenza e per lo storico. In media fanno perdere: il consiglio del modello è di non giocare.</p></div>`;
     } else {
       html = `<div class="banner none"><strong>Nessuna schedina oggi.</strong>
@@ -50,13 +50,9 @@
     </li>`;
   }
 
-  function renderTickets(data) {
-    const negative = data.status !== 'valore_positivo';
-    $('tickets').innerHTML = data.tickets
-      .map(
-        (t) => `<article class="card ticket">
-        <div class="ticket-head">
-          <h3>Schedina ${esc(t.name)} <span class="hint">· fascia ${t.minOdd}–${t.maxOdd}</span></h3>
+  function renderTicket(t, negative) {
+    return `<div class="ticket-head">
+          <h3>${t.featured ? 'Schedina del giorno' : `Schedina ${esc(t.name)}`} <span class="hint">· fascia ${t.minOdd}–${t.maxOdd}</span></h3>
           <span class="badge ${negative ? 'neg' : ''}">${t.legs.length} esiti</span>
         </div>
         <div class="kpis">
@@ -65,11 +61,22 @@
           <div class="kpi"><div class="label">Vince circa</div><div class="value">1 su ${t.oneIn}</div></div>
           <div class="kpi"><div class="label">Valore atteso</div><div class="value ${cls(t.ev)}">${signedPct(t.ev)}</div></div>
           <div class="kpi"><div class="label">Prob. secondo il mercato</div><div class="value">${pct(t.probMarket, 1)}</div></div>
+          <div class="kpi"><div class="label">Valore atteso (solo mercato)</div><div class="value ${cls(t.evMarket)}">${signedPct(t.evMarket)}</div></div>
         </div>
-        <ul class="legs">${t.legs.map(renderLeg).join('')}</ul>
-      </article>`
-      )
-      .join('');
+        <ul class="legs">${t.legs.map(renderLeg).join('')}</ul>`;
+  }
+
+  function renderTickets(data) {
+    const negative = data.status !== 'valore_positivo';
+    const main = data.tickets.find((t) => t.featured) || data.tickets[0];
+    const others = data.tickets.filter((t) => t !== main);
+    let html = main ? `<article class="card ticket featured">${renderTicket(main, negative)}</article>` : '';
+    if (others.length) {
+      html += `<details class="card alternatives"><summary><strong>Alternative più rischiose</strong>
+        <span class="hint">· ${others.map((t) => `${esc(t.name)} a quota ${odd(t.totalOdd)}, 1 su ${t.oneIn}`).join(' · ')}</span></summary>
+        ${others.map((t) => `<div class="alt">${renderTicket(t, negative)}</div>`).join('')}</details>`;
+    }
+    $('tickets').innerHTML = html;
   }
 
   function renderShortlist(data) {
@@ -114,7 +121,7 @@
     const a = stats.allCandidates;
     if (a) {
       html += `<h3 style="margin-top:16px">Precisione delle probabilità</h3>
-        <p class="hint">Su ${a.n} esiti analizzati e già giocati (non solo quelli in schedina). Più basso è meglio.</p>
+        <p class="hint">Su ${a.n} esiti di ${a.matches} partite concluse (non solo quelli in schedina). Più basso è meglio.</p>
         <div class="table-scroll"><table><thead><tr><th></th><th class="num">Modello</th><th class="num">Mercato</th></tr></thead><tbody>
           <tr><td>Brier score</td><td class="num">${num(a.brierModel, 4)}</td><td class="num">${num(a.brierMarket, 4)}</td></tr>
           <tr><td>Log-loss</td><td class="num">${num(a.logLossModel, 4)}</td><td class="num">${num(a.logLossMarket, 4)}</td></tr>
@@ -140,6 +147,7 @@
   function resultLabel(r) {
     if (r === 'won') return '<span class="res-won">vinta</span>';
     if (r === 'lost') return '<span class="res-lost">persa</span>';
+    if (r === 'void') return '<span class="res-pending">annullata</span>';
     return '<span class="res-pending">in corso</span>';
   }
 
@@ -160,7 +168,7 @@
         ${d.tickets.length ? '' : '<p class="hint">Nessuna schedina.</p>'}
         ${d.tickets
           .map(
-            (t) => `<details><summary>${esc(t.name)} · quota ${odd(t.totalOdd)} · prob. ${pct(t.prob, 1)} · ${resultLabel(t.result)}</summary>
+            (t) => `<details><summary>${t.featured ? '<strong>Del giorno</strong> · ' : ''}${esc(t.name)} · quota ${odd(t.totalOdd)} · prob. ${pct(t.prob, 1)} · ${resultLabel(t.result)}</summary>
             <ul>${t.legs.map((l) => `<li>${legResult(l)}</li>`).join('')}</ul></details>`
           )
           .join('')}

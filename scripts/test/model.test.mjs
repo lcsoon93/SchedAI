@@ -86,3 +86,16 @@ test('Ottimizzatore: nessuna schedina se la fascia è irraggiungibile', () => {
   const groups = [[{ odd: 1.5, p: 0.7 }], [{ odd: 1.5, p: 0.7 }]];
   assert.equal(buildTicket(groups, { minLegs: 2, maxLegs: 5, minOdd: 10, maxOdd: 20 }), null);
 });
+
+test('Storico: schedina con tutte le gambe annullate non conta come vinta', async () => {
+  const { settleAll, computeStats } = await import('../lib/history.mjs');
+  const history = { days: [{ date: '2026-10-01', tickets: [{ band: 'prudente', name: 'Prudente', featured: true, prob: 0.1, legs: [
+    { fixtureId: 1, key: '1X2|1', odd: 2, p: 0.5, pMarket: 0.5, result: null },
+    { fixtureId: 2, key: 'GG|GG', odd: 2, p: 0.5, pMarket: 0.5, result: null },
+  ] }] }] };
+  const client = { get: async () => ({ response: [1, 2].map((id) => ({ fixture: { id, status: { short: 'PST' } }, goals: {} })) }) };
+  await settleAll(history, [], client);
+  assert.equal(history.days[0].tickets[0].result, 'void');
+  const stats = computeStats(history, []);
+  assert.equal(stats.ticketsClosed, 0);
+});

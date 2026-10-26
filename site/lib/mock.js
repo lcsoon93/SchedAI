@@ -1,6 +1,7 @@
 // Client finto con dati simulati ma coerenti, per provare la pipeline e la
-// pagina senza consumare richieste (node scripts/generate.mjs --mock).
-import { poissonProbabilities } from './model.mjs';
+// pagina senza consumare richieste (node scripts/generate.mjs --mock, o la
+// pagina aperta con ?demo).
+import { poissonProbabilities } from './model.js';
 
 function rng(seed) {
   let s = seed >>> 0;
@@ -45,7 +46,7 @@ export function createMockClient(date) {
 
     fixtures.push({
       fixture: { id, date: kickoff, status: { short: 'NS' } },
-      league: { id: lid, name: lname, country },
+      league: { id: lid, name: lname, country, season: 2026 },
       teams: { home: { name: `Casa ${i + 1}` }, away: { name: `Ospite ${i + 1}` } },
       goals: { home: null, away: null },
     });
@@ -97,8 +98,8 @@ export function createMockClient(date) {
       if (path === '/predictions') return { response: [predictions.get(Number(params.fixture))] };
       throw new Error(`mock: ${path} non gestito`);
     },
-    async getAllPages(path) {
-      if (path === '/odds') return odds;
+    async getAllPages(path, params = {}) {
+      if (path === '/odds') return odds.filter((o) => !params.league || o.league.id === Number(params.league));
       throw new Error(`mock: ${path} non gestito`);
     },
   };

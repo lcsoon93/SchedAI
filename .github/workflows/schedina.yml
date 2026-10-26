@@ -1,7 +1,10 @@
-name: Schedina del giorno
+name: Pubblica SchedAI
 
 on:
+  push:
+    branches: [main]
   schedule:
+    # Corsa di riferimento per lo storico ufficiale:
     # 06:30 UTC = 07:30/08:30 in Italia (ora solare/legale)
     - cron: '30 6 * * *'
   workflow_dispatch:
@@ -32,18 +35,24 @@ jobs:
       - name: Test del modello
         run: node --test 'scripts/test/*.test.mjs'
 
-      - name: Analisi del palinsesto
+      # Storico ufficiale: solo dalla corsa programmata o lanciata a mano,
+      # e solo se il secret c'è. Un push pubblica solo la pagina.
+      - name: Corsa di riferimento
+        if: github.event_name != 'push'
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           DATE_INPUT: ${{ inputs.date }}
         run: |
-          if [ -n "$DATE_INPUT" ]; then
+          if [ -z "$API_FOOTBALL_KEY" ]; then
+            echo "Secret API_FOOTBALL_KEY non impostato: salto lo storico ufficiale."
+          elif [ -n "$DATE_INPUT" ]; then
             node scripts/generate.mjs --date "$DATE_INPUT"
           else
             node scripts/generate.mjs
           fi
 
       - name: Salva storico nel repository
+        if: github.event_name != 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898333+github-actions[bot]@users.noreply.github.com"

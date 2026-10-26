@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shinProbs, poissonProbabilities, settlePick, marketProbabilities } from '../lib/model.mjs';
-import { buildTicket } from '../lib/optimizer.mjs';
+import { shinProbs, poissonProbabilities, settlePick, marketProbabilities } from '../../site/lib/model.js';
+import { buildTicket } from '../../site/lib/optimizer.js';
 
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
@@ -88,7 +88,7 @@ test('Ottimizzatore: nessuna schedina se la fascia è irraggiungibile', () => {
 });
 
 test('Storico: schedina con tutte le gambe annullate non conta come vinta', async () => {
-  const { settleAll, computeStats } = await import('../lib/history.mjs');
+  const { settleAll, computeStats } = await import('../../site/lib/history.js');
   const history = { days: [{ date: '2026-10-01', tickets: [{ band: 'prudente', name: 'Prudente', featured: true, prob: 0.1, legs: [
     { fixtureId: 1, key: '1X2|1', odd: 2, p: 0.5, pMarket: 0.5, result: null },
     { fixtureId: 2, key: 'GG|GG', odd: 2, p: 0.5, pMarket: 0.5, result: null },
@@ -101,7 +101,7 @@ test('Storico: schedina con tutte le gambe annullate non conta come vinta', asyn
 });
 
 test('Storico: ai supplementari senza risultato al 90 la gamba resta aperta', async () => {
-  const { settleAll } = await import('../lib/history.mjs');
+  const { settleAll } = await import('../../site/lib/history.js');
   const history = { days: [{ date: '2026-10-01', tickets: [{ band: 'prudente', legs: [{ fixtureId: 1, key: 'OU|Over 2.5', odd: 2, p: 0.5, result: null }] }] }] };
   const client = { get: async () => ({ response: [{ fixture: { id: 1, status: { short: 'AET' } }, goals: { home: 2, away: 1 }, score: { fulltime: { home: null, away: null } } }] }) };
   await settleAll(history, [], client);

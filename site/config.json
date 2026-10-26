@@ -3,6 +3,13 @@
   "minutesBeforeKickoff": 60,
   "maxFixturesToAnalyze": 90,
 
+  "leaguePresets": [
+    { "id": "tutti", "name": "Tutti i campionati seguiti", "leagues": [] },
+    { "id": "top5", "name": "Top 5 europei", "leagues": [135, 39, 140, 78, 61] },
+    { "id": "italia", "name": "Italia (Serie A e B)", "leagues": [135, 136] },
+    { "id": "coppe", "name": "Coppe europee", "leagues": [2, 3, 848] }
+  ],
+
   "leagues": [
     135, 136, 39, 40, 140, 141, 78, 79, 61, 62, 88, 94, 144, 203, 179,
     207, 218, 119, 103, 113, 197, 106, 345, 210, 2, 3, 848, 71, 128, 253
@@ -29,6 +36,8 @@
   },
 
   "ticket": {
+    "minOdd": 10,
+    "maxOdd": 100,
     "minLegs": 2,
     "maxLegs": 10,
     "maxPerLeague": 2,

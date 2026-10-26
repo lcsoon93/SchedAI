@@ -11,6 +11,7 @@
   --bad: #b3261e;
   --bad-soft: #fbe9e7;
   --radius: 14px;
+  --on-accent: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -26,6 +27,7 @@
     --warn-soft: #332611;
     --bad: #f2867d;
     --bad-soft: #3a1c1a;
+    --on-accent: #0d1a15;
   }
 }
 
@@ -86,6 +88,7 @@ main > *, #tickets > * { min-width: 0; }
 .banner.caution { background: var(--warn-soft); border-color: var(--warn); }
 .banner.none { background: var(--bad-soft); border-color: var(--bad); }
 .banner p { margin: 4px 0 0; }
+#result .meta { margin: 0; }
 
 #tickets { display: grid; gap: 16px; }
 
@@ -190,3 +193,53 @@ footer { color: var(--muted); font-size: 13px; padding-bottom: 32px; }
   h1 { font-size: 26px; }
   .kpi .value { font-size: 19px; }
 }
+
+.stack { display: grid; gap: 16px; }
+.stack:empty { display: none; }
+.stack .banner + .banner { margin-top: 0; }
+#official-card details { margin-top: 12px; }
+#official-card h3 { margin-top: 16px; }
+details > summary { cursor: pointer; }
+details.card > summary { list-style-position: outside; }
+details[open].card > summary { margin-bottom: 12px; }
+#stats h3 { margin-top: 16px; }
+
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.row p { margin: 0; }
+.grow { flex: 1 1 220px; }
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.form-grid .submit { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+input, select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+  min-width: 0;
+}
+button {
+  font: inherit;
+  font-weight: 600;
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+#progress { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+#progress[hidden] { display: none; }
+progress { flex: 1; accent-color: var(--accent); }
+#mine .day, #recent .day { margin-top: 8px; }
+a { color: var(--accent); }
+.age-banner a { color: inherit; }

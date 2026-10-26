@@ -1,30 +1,34 @@
 #!/usr/bin/env node
-// Genera la schedina del giorno e aggiorna lo storico.
+// Corsa automatica giornaliera: lo storico ufficiale di SchedAI.
+//
+// Le richieste fatte dalla pagina restano nel browser di chi le fa; solo
+// questa corsa, a orario fisso e con parametri fissi, alimenta la sezione
+// "Come sta andando", così rilanciare finché piace il risultato non falsa
+// le statistiche.
 //
 //   API_FOOTBALL_KEY=... node scripts/generate.mjs [--date AAAA-MM-GG]
 //   node scripts/generate.mjs --mock        (dati simulati, nessuna chiamata)
 //   --out DIR   cartella di output (default site/data)
 //   --force     sostituisce nello storico la schedina già salvata per la data
 //
-// Scrive in site/data: latest.json (letto dalla pagina), history.json
-// (schedine ed esiti), archive/AAAA-MM-GG.json (copia del giorno) e
+// Scrive in site/data: latest.json (schedina di riferimento e statistiche),
+// history.json (schedine ed esiti), archive/AAAA-MM-GG.json e
 // candidates/AAAA-MM-GG.json (tutti gli esiti analizzati, per la calibrazione).
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApiClient } from './lib/api.mjs';
-import { createMockClient } from './lib/mock.mjs';
-import { analyzeFixture, eligibleOptions, priceAt } from './lib/model.mjs';
-import { buildTicket } from './lib/optimizer.mjs';
-import { settleAll, computeStats } from './lib/history.mjs';
+import { createApiClient } from '../site/lib/api.js';
+import { createMockClient } from '../site/lib/mock.js';
+import { runAnalysis, compactTicket } from '../site/lib/pipeline.js';
+import { settleAll, computeStats } from '../site/lib/history.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const args = process.argv.slice(2);
 const argValue = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null);
 const mock = args.includes('--mock');
-const dateArg = argValue('--date');
 const force = args.includes('--force');
+const dateArg = argValue('--date');
 const DATA_DIR = resolve(argValue('--out') || join(ROOT, 'site', 'data'));
 
 async function readJson(path, fallback) {
@@ -44,75 +48,8 @@ function todayIn(timeZone) {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
-// Una multipla si gioca su un solo bookmaker: per ogni book giocabile si
-// costruiscono le schedine con le sue quote, poi per ogni fascia si tiene
-// la più probabile tra i book.
-function makeTickets(analyses, cfg, minEdge, minMarketEdge, minTicketEV) {
-  const context = (a) => ({
-    fixtureId: a.fixtureId,
-    kickoff: a.kickoff,
-    league: a.league,
-    leagueId: a.leagueId,
-    country: a.country,
-    match: `${a.home} – ${a.away}`,
-    formHome: a.formHome,
-    formAway: a.formAway,
-    xg: a.xg,
-    apiAdvice: a.apiAdvice,
-    oddsUpdatedAt: a.oddsUpdatedAt,
-  });
-
-  const best = {};
-  for (const bookId of cfg.playableBookmakerIds) {
-    const groups = analyses
-      .map((a) => {
-        const priced = a.options.map((o) => priceAt(o, bookId)).filter(Boolean);
-        return eligibleOptions(priced, cfg.selection, minEdge, minMarketEdge).map((o) => ({ ...o, ...context(a) }));
-      })
-      .filter((g) => g.length);
-    if (groups.length < cfg.ticket.minLegs) continue;
-
-    for (const band of cfg.ticket.bands) {
-      const t = buildTicket(groups, {
-        minLegs: cfg.ticket.minLegs,
-        maxLegs: cfg.ticket.maxLegs,
-        minOdd: band.minOdd,
-        maxOdd: band.maxOdd,
-        maxPerTag: cfg.ticket.maxPerLeague,
-        tagOf: (o) => o.leagueId,
-        accept: (ticket) => minTicketEV === null || ticket.ev >= minTicketEV,
-      });
-      if (t && (!best[band.id] || t.prob > best[band.id].t.prob)) best[band.id] = { t, band };
-    }
-  }
-
-  const tickets = Object.values(best).map(({ t, band }) => {
-    const probMarket = t.legs.reduce((a, l) => a * l.pMarket, 1);
-    return {
-      band: band.id,
-      name: band.name,
-      minOdd: band.minOdd,
-      maxOdd: band.maxOdd,
-      bookmaker: t.legs[0].bookmaker,
-      totalOdd: t.totalOdd,
-      prob: t.prob,
-      probMarket,
-      evMarket: probMarket * t.totalOdd - 1,
-      ev: t.ev,
-      oneIn: Math.round(1 / t.prob),
-      legs: t.legs.map((l) => ({ ...l, fairOdd: Math.round(100 / l.p) / 100 })),
-    };
-  });
-
-  // Elenco degli esiti con valore, alla quota migliore tra i book.
-  const candidates = analyses.flatMap((a) =>
-    eligibleOptions(a.options, cfg.selection, minEdge, minMarketEdge).map((o) => ({ ...o, ...context(a) }))
-  );
-  return { tickets, candidates };
-}
-
 async function main() {
-  const cfg = JSON.parse(await readFile(join(ROOT, 'schedina.config.json'), 'utf8'));
+  const cfg = JSON.parse(await readFile(join(ROOT, 'site', 'config.json'), 'utf8'));
   const date = dateArg || todayIn(cfg.timezone);
 
   let client;
@@ -161,125 +98,36 @@ async function main() {
     return;
   }
 
-  console.log(`Palinsesto del ${date} (${cfg.timezone})...`);
-  const fixturesBody = await client.get('/fixtures', { date, timezone: cfg.timezone });
-  const allFixtures = fixturesBody.response || [];
-  const leagues = new Set(cfg.leagues);
-  const earliest = Date.now() + cfg.minutesBeforeKickoff * 60000;
-  const fixtures = allFixtures.filter(
-    (fx) =>
-      fx.fixture.status.short === 'NS' &&
-      (!leagues.size || leagues.has(fx.league.id)) &&
-      (mock || new Date(fx.fixture.date).getTime() >= earliest)
-  );
-  console.log(`${allFixtures.length} partite in programma, ${fixtures.length} nei campionati seguiti e non ancora iniziate.`);
-
-  const oddsList = fixtures.length ? await client.getAllPages('/odds', { date, timezone: cfg.timezone }) : [];
-  const oddsByFixture = new Map(oddsList.map((o) => [o.fixture.id, o]));
-  const withOdds = fixtures
-    .filter((fx) => oddsByFixture.has(fx.fixture.id))
-    .sort((a, b) => a.fixture.date.localeCompare(b.fixture.date))
-    .slice(0, cfg.maxFixturesToAnalyze);
-  console.log(`${withOdds.length} partite con quote pre-match.`);
-
-  const analyses = [];
-  for (const fx of withOdds) {
-    let prediction = null;
-    try {
-      const body = await client.get('/predictions', { fixture: fx.fixture.id });
-      prediction = body.response?.[0] || null;
-    } catch (err) {
-      console.warn(`Previsione non disponibile per ${fx.fixture.id}: ${err.message}`);
-    }
-    const a = analyzeFixture(fx, oddsByFixture.get(fx.fixture.id), prediction, cfg);
-    if (a) analyses.push(a);
-  }
-
-  let status = 'valore_positivo';
-  let { tickets, candidates } = makeTickets(analyses, cfg, cfg.selection.minEdge, cfg.selection.minMarketEdge, cfg.ticket.minTicketEV);
-  if (!tickets.length) {
-    status = 'valore_negativo';
-    ({ tickets, candidates } = makeTickets(analyses, cfg, cfg.selection.fallbackMinEdge, null, null));
-  }
-  if (!tickets.length) status = 'nessuna_schedina';
-  // La schedina del giorno è la più probabile; le altre fasce sono alternative.
-  tickets.sort((a, b) => b.prob - a.prob);
-  tickets.forEach((t, i) => (t.featured = i === 0));
-  console.log(`Stato: ${status}, ${tickets.length} schedine, ${candidates.length} esiti candidati.`);
+  console.log(`Analisi del ${date} (${cfg.timezone})...`);
+  const { analyses, ...latest } = await runAnalysis(client, cfg, { date, bands: cfg.ticket.bands, ignoreKickoff: mock });
+  console.log(`Stato: ${latest.status}, ${latest.tickets.length} schedine, ${latest.summary.fixturesAnalyzed} partite analizzate.`);
 
   history.days = history.days.filter((d) => d.date !== date);
-  history.days.push({
-    date,
-    status,
-    mock,
-    tickets: tickets.map((t) => ({
-      band: t.band,
-      name: t.name,
-      featured: t.featured,
-      bookmaker: t.bookmaker,
-      totalOdd: t.totalOdd,
-      prob: t.prob,
-      probMarket: t.probMarket,
-      ev: t.ev,
-      result: null,
-      legs: t.legs.map((l) => ({
-        fixtureId: l.fixtureId,
-        key: l.key,
-        label: l.label,
-        match: l.match,
-        league: l.league,
-        kickoff: l.kickoff,
-        odd: l.odd,
-        bookmaker: l.bookmaker,
-        oddsUpdatedAt: l.oddsUpdatedAt,
-        p: l.p,
-        pMarket: l.pMarket,
-        result: null,
-      })),
-    })),
-  });
+  history.days.push({ date, status: latest.status, mock, tickets: latest.tickets.map(compactTicket) });
   history.days.sort((a, b) => a.date.localeCompare(b.date));
 
-  const latest = {
-    generatedAt: new Date().toISOString(),
-    date,
-    timezone: cfg.timezone,
-    mock,
-    status,
-    summary: {
-      fixturesScheduled: allFixtures.length,
-      fixturesFollowed: fixtures.length,
-      fixturesAnalyzed: analyses.length,
-      candidates: candidates.length,
-      apiCalls: client.calls,
-    },
-    tickets,
-    shortlist: [...candidates].sort((a, b) => b.edge - a.edge).slice(0, 25),
-    stats: computeStats(history, candidateDays),
-    recent: history.days.slice(-14).reverse(),
-  };
+  latest.mock = mock;
+  latest.stats = computeStats(history, candidateDays);
+  latest.recent = history.days.slice(-14).reverse();
 
   await writeJson(join(DATA_DIR, 'latest.json'), latest);
   await writeJson(archivePath, latest);
   await writeJson(historyPath, history);
   // Formato compatto: f=fixture, k=esito, p=stima finale, m=mercato, g=Poisson,
   // a=API-Football, o=quota, r=risultato. g e a servono a ricalibrare i pesi.
-  await writeJson(join(candDir, `${date}.json`), {
-    date,
-    mock,
-    rows: analyses.flatMap((a) =>
-      a.options.map((o) => ({
-        f: a.fixtureId,
-        k: o.key,
-        p: +o.p.toFixed(4),
-        m: +o.pMarket.toFixed(4),
-        g: o.pPoisson == null ? null : +o.pPoisson.toFixed(4),
-        a: o.pApi == null ? null : +o.pApi.toFixed(4),
-        o: o.odd,
-        r: null,
-      }))
-    ),
-  }, true);
+  const rows = analyses.flatMap((a) =>
+    a.options.map((o) => ({
+      f: a.fixtureId,
+      k: o.key,
+      p: +o.p.toFixed(4),
+      m: +o.pMarket.toFixed(4),
+      g: o.pPoisson == null ? null : +o.pPoisson.toFixed(4),
+      a: o.pApi == null ? null : +o.pApi.toFixed(4),
+      o: o.odd,
+      r: null,
+    }))
+  );
+  await writeJson(join(candDir, `${date}.json`), { date, mock, rows }, true);
   console.log(`Fatto. Chiamate API usate: ${client.calls}.`);
 }
 

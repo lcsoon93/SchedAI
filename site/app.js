@@ -1,201 +1,342 @@
-// Rendering della pagina a partire da data/latest.json (generato dalla Action).
-(function () {
-  const $ = (id) => document.getElementById(id);
-  const esc = (s) =>
-    String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-  const pct = (p, d = 0) => (p == null ? '–' : `${(p * 100).toFixed(d).replace('.', ',')}%`);
-  const signedPct = (x, d = 1) => (x == null ? '–' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(d).replace('.', ',')}%`);
-  const odd = (o) => (o == null ? '–' : o.toFixed(2).replace('.', ','));
-  const num = (x, d = 3) => (x == null ? '–' : x.toFixed(d).replace('.', ','));
-  const cls = (x) => (x == null ? '' : x >= 0 ? 'pos' : 'neg');
+// Pagina SchedAI: analisi su richiesta nel browser + storico ufficiale.
+//
+// La chiave api-football resta solo nel localStorage di questo browser e
+// viene inviata solo a api-football. Con ?demo la pagina usa dati simulati.
+import { createApiClient } from './lib/api.js';
+import { createMockClient } from './lib/mock.js';
+import { runAnalysis, compactTicket } from './lib/pipeline.js';
+import { settleAll } from './lib/history.js';
+import * as R from './lib/render.js';
 
-  let tz = 'Europe/Rome';
-  const time = (iso) =>
-    new Date(iso).toLocaleString('it-IT', { timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  const longDate = (d) =>
-    new Date(`${d}T12:00:00Z`).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const $ = (id) => document.getElementById(id);
+const demo = new URLSearchParams(location.search).has('demo');
 
-  function renderStatus(data) {
-    const s = data.status;
-    let html;
-    if (s === 'valore_positivo') {
-      html = `<div class="banner ok"><strong>Oggi il modello trova valore.</strong>
-        <p>Le schedine sotto hanno valore atteso stimato positivo. Restano scommesse ad alto rischio: guarda la probabilità, non solo la quota.</p></div>`;
-    } else if (s === 'valore_negativo') {
-      html = `<div class="banner caution"><strong>Oggi nessuna combinazione ha valore atteso positivo.</strong>
-        <p>Le schedine sotto sono le meno sfavorevoli trovate, pubblicate per trasparenza e per lo storico. In media fanno perdere: il consiglio del modello è di non giocare.</p></div>`;
-    } else {
-      html = `<div class="banner none"><strong>Nessuna schedina oggi.</strong>
-        <p>Non ci sono abbastanza esiti affidabili per comporre una schedina tra quota 10 e 100.</p></div>`;
+const KEY_STORE = 'schedai.apiKey';
+const REQ_STORE = 'schedai.requests';
+const PRED_PREFIX = 'schedai.pred.';
+const PRED_TTL = 6 * 3600 * 1000;
+const MEM_TTL = 10 * 60 * 1000;
+const MAX_SAVED = 100;
+
+const store = {
+  get(k) {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
     }
-    if (data.mock) {
-      html += `<div class="banner none" style="margin-top:12px"><strong>Dati simulati.</strong><p>Questa è un'anteprima con partite finte, non usarla.</p></div>`;
+  },
+  set(k, v) {
+    try {
+      localStorage.setItem(k, v);
+      return true;
+    } catch {
+      return false;
     }
-    $('status').innerHTML = html;
+  },
+  del(k) {
+    try {
+      localStorage.removeItem(k);
+    } catch {}
+  },
+};
+
+function todayRome(offsetDays = 0) {
+  const d = new Date(Date.now() + offsetDays * 86400000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+
+// Cache in memoria per palinsesto e quote (10 minuti), così rilanciare con
+// altri campionati o un'altra fascia di quota non consuma richieste.
+function withMemoryCache(client) {
+  const mem = new Map();
+  const cached = (name, fn) => async (path, params = {}) => {
+    const k = `${name}:${path}:${JSON.stringify(params)}`;
+    const hit = mem.get(k);
+    if (hit && Date.now() - hit.t < MEM_TTL) return hit.v;
+    const v = await fn(path, params);
+    mem.set(k, { t: Date.now(), v });
+    return v;
+  };
+  return {
+    get: cached('get', client.get),
+    getAllPages: cached('pages', client.getAllPages),
+    get calls() {
+      return client.calls;
+    },
+  };
+}
+
+// Le statistiche delle squadre cambiano poco: cache di 6 ore nel browser.
+function predictionGetter(client) {
+  return async (fixtureId) => {
+    const k = PRED_PREFIX + fixtureId;
+    try {
+      const hit = JSON.parse(store.get(k) || 'null');
+      if (hit && Date.now() - hit.t < PRED_TTL) return hit.v;
+    } catch {}
+    const v = (await client.get('/predictions', { fixture: fixtureId })).response?.[0] || null;
+    store.set(k, JSON.stringify({ t: Date.now(), v }));
+    return v;
+  };
+}
+
+function prunePredictionCache() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(PRED_PREFIX)) continue;
+      const hit = JSON.parse(localStorage.getItem(k) || 'null');
+      if (!hit || Date.now() - hit.t > PRED_TTL) localStorage.removeItem(k);
+    }
+  } catch {}
+}
+
+let cfg;
+let cachedClient = null;
+
+function apiKey() {
+  return store.get(KEY_STORE);
+}
+
+function clientFor(date) {
+  if (demo) return createMockClient(date);
+  const key = apiKey();
+  if (!key) return null;
+  if (cachedClient?.key !== key) cachedClient = { key, client: withMemoryCache(createApiClient(key)) };
+  return cachedClient.client;
+}
+
+// --- Chiave --------------------------------------------------------------
+
+async function renderKey() {
+  const key = apiKey();
+  const box = $('key-box');
+  if (demo) {
+    box.innerHTML = `<p>Modalità <strong>demo</strong>: dati simulati, nessuna chiave usata. <a href="./">Esci dalla demo</a></p>`;
+    return;
+  }
+  if (!key) {
+    box.innerHTML = `<form id="key-form" class="row">
+        <label class="grow">Chiave api-football
+          <input id="key-input" type="password" autocomplete="off" required placeholder="Incolla qui la tua chiave">
+        </label>
+        <button type="submit">Salva</button>
+      </form>
+      <p class="hint">La chiave resta solo in questo browser e viene inviata solo a api-football: non finisce su GitHub. Vuoi solo provare? <a href="?demo">Apri la demo</a>.</p>`;
+    $('key-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const v = $('key-input').value.trim();
+      if (!v) return;
+      if (!store.set(KEY_STORE, v)) {
+        alert('Il browser non permette di salvare la chiave (navigazione privata?).');
+        return;
+      }
+      renderKey();
+      updateFormState();
+    });
+    return;
   }
 
-  function renderLeg(l) {
-    const form = l.formHome && l.formAway ? `<span>Forma <span class="form">${esc(l.formHome)}</span> / <span class="form">${esc(l.formAway)}</span></span>` : '';
-    return `<li class="leg">
-      <div><div class="match">${esc(l.match)}</div><div class="when">${esc(l.league)} · ${esc(time(l.kickoff))}</div></div>
-      <div class="odd" title="${esc(l.bookmaker)}">${odd(l.odd)}</div>
-      <div class="pick">${esc(l.marketLabel)}: <strong>${esc(l.label)}</strong></div>
-      <div class="nums">
-        <span>Prob. ${pct(l.p)}</span>
-        <span>Quota equa ${odd(l.fairOdd)}</span>
-        <span class="${cls(l.edge)}">Vantaggio ${signedPct(l.edge)}</span>
-        ${form}
-      </div>
-      <div class="why">${esc(l.reasons.join(' · '))} · quota: ${esc(l.bookmaker)}</div>
-    </li>`;
+  box.innerHTML = `<div class="row"><p class="grow">Chiave salvata in questo browser. <span id="quota" class="hint"></span></p>
+    <button type="button" id="key-remove" class="secondary">Rimuovi chiave</button></div>`;
+  $('key-remove').addEventListener('click', () => {
+    store.del(KEY_STORE);
+    cachedClient = null;
+    renderKey();
+    updateFormState();
+  });
+  try {
+    // /status non consuma richieste del piano.
+    const body = await createApiClient(key).get('/status');
+    const req = body.response?.requests;
+    if (req) $('quota').textContent = `Richieste usate oggi: ${req.current} su ${req.limit_day}.`;
+  } catch (err) {
+    $('quota').textContent = `La chiave non funziona: ${err.message}`;
   }
+}
 
-  function renderTicket(t, negative) {
-    const title = !t.featured ? `Schedina ${esc(t.name)}` : negative ? 'Solo esempio: oggi nessuna giocata consigliata' : 'Schedina del giorno';
-    return `<div class="ticket-head">
-          <h3>${title} <span class="hint">· fascia ${t.minOdd}–${t.maxOdd} · tutta su ${esc(t.bookmaker)}</span></h3>
-          <span class="badge ${negative ? 'neg' : ''}">${t.legs.length} esiti</span>
-        </div>
-        <div class="kpis">
-          <div class="kpi"><div class="label">Quota totale</div><div class="value">${odd(t.totalOdd)}</div></div>
-          <div class="kpi"><div class="label">Probabilità stimata</div><div class="value">${pct(t.prob, 1)}</div></div>
-          <div class="kpi"><div class="label">Vince circa</div><div class="value">1 su ${t.oneIn}</div></div>
-          <div class="kpi"><div class="label">Valore atteso</div><div class="value ${cls(t.ev)}">${signedPct(t.ev)}</div></div>
-          <div class="kpi"><div class="label">Prob. secondo il mercato</div><div class="value">${pct(t.probMarket, 1)}</div></div>
-          <div class="kpi"><div class="label">Valore atteso (solo mercato)</div><div class="value ${cls(t.evMarket)}">${signedPct(t.evMarket)}</div></div>
-        </div>
-        <ul class="legs">${t.legs.map(renderLeg).join('')}</ul>`;
+// --- Richiesta -----------------------------------------------------------
+
+function renderForm() {
+  const dateIn = $('f-date');
+  dateIn.value = todayRome();
+  dateIn.min = todayRome();
+  dateIn.max = todayRome(7);
+  $('f-preset').innerHTML = cfg.leaguePresets.map((p) => `<option value="${R.esc(p.id)}">${R.esc(p.name)}</option>`).join('');
+  for (const id of ['f-min', 'f-max']) {
+    $(id).min = cfg.ticket.minOdd;
+    $(id).max = cfg.ticket.maxOdd;
   }
+  $('f-min').value = cfg.ticket.minOdd;
+  $('f-max').value = cfg.ticket.maxOdd;
+  $('f-legs').innerHTML = Array.from({ length: cfg.ticket.maxLegs - cfg.ticket.minLegs + 1 }, (_, i) => {
+    const n = cfg.ticket.minLegs + i;
+    return `<option value="${n}" ${n === cfg.ticket.maxLegs ? 'selected' : ''}>fino a ${n}</option>`;
+  }).join('');
+  $('query-form').addEventListener('submit', onSubmit);
+  updateFormState();
+}
 
-  function renderTickets(data) {
-    const negative = data.status !== 'valore_positivo';
-    const main = data.tickets.find((t) => t.featured) || data.tickets[0];
-    const others = data.tickets.filter((t) => t !== main);
-    let html = main ? `<article class="card ticket ${negative ? '' : 'featured'}">${renderTicket(main, negative)}</article>` : '';
-    if (others.length) {
-      html += `<details class="card alternatives"><summary><strong>Alternative più rischiose</strong>
-        <span class="hint">· ${others.map((t) => `${esc(t.name)} a quota ${odd(t.totalOdd)}, 1 su ${t.oneIn}`).join(' · ')}</span></summary>
-        ${others.map((t) => `<div class="alt">${renderTicket(t, negative)}</div>`).join('')}</details>`;
-    }
-    $('tickets').innerHTML = html;
+function updateFormState() {
+  const ready = demo || !!apiKey();
+  $('f-submit').disabled = !ready;
+  $('f-hint').textContent = ready ? '' : 'Salva prima la chiave api-football qui sopra.';
+}
+
+async function onSubmit(e) {
+  e.preventDefault();
+  const date = $('f-date').value;
+  let minOdd = Number($('f-min').value);
+  let maxOdd = Number($('f-max').value);
+  if (minOdd > maxOdd) [minOdd, maxOdd] = [maxOdd, minOdd];
+  const preset = cfg.leaguePresets.find((p) => p.id === $('f-preset').value);
+  const maxLegs = Number($('f-legs').value);
+  const client = clientFor(date);
+  if (!client) return;
+
+  const btn = $('f-submit');
+  btn.disabled = true;
+  $('result').innerHTML = '';
+  $('progress').hidden = false;
+  const callsBefore = client.calls;
+
+  try {
+    const result = await runAnalysis(client, cfg, {
+      date,
+      leagues: preset?.leagues,
+      minOdd,
+      maxOdd,
+      maxLegs,
+      ignoreKickoff: demo,
+      getPrediction: demo ? undefined : predictionGetter(client),
+      onProgress: (phase, done, total) => {
+        $('progress-text').textContent = total > 1 ? `${phase}: ${done + 1} di ${total}…` : `${phase}…`;
+        $('progress-bar').value = total > 1 ? done / total : 0;
+      },
+    });
+    result.mock = demo;
+    renderResult(result, client.calls - callsBefore);
+    saveRequest(result);
+    renderRequests();
+  } catch (err) {
+    $('result').innerHTML = `<div class="banner none"><strong>Analisi non riuscita.</strong><p>${R.esc(err.message)}</p></div>`;
+  } finally {
+    $('progress').hidden = true;
+    btn.disabled = false;
   }
+}
 
-  function renderShortlist(data) {
-    const rows = data.shortlist || [];
-    if (!rows.length) {
-      $('shortlist-card').hidden = true;
-      return;
-    }
-    $('shortlist').innerHTML = `<thead><tr>
-        <th>Partita</th><th>Esito</th><th class="num">Quota</th><th class="num">Prob.</th><th class="num">Mercato</th><th class="num">Vantaggio</th>
-      </tr></thead><tbody>${rows
-        .map(
-          (r) => `<tr>
-          <td>${esc(r.match)}<br><span class="hint">${esc(r.league)} · ${esc(time(r.kickoff))}</span></td>
-          <td>${esc(r.label)}</td>
-          <td class="num">${odd(r.odd)}</td>
-          <td class="num">${pct(r.p)}</td>
-          <td class="num">${pct(r.pMarket)}</td>
-          <td class="num ${cls(r.edge)}">${signedPct(r.edge)}</td>
-        </tr>`
-        )
-        .join('')}</tbody>`;
+function renderResult(r, calls) {
+  const s = r.summary;
+  $('result').innerHTML = `
+    <p class="meta">${R.esc(R.longDate(r.date))} · ${s.fixturesAnalyzed} partite analizzate su ${s.fixturesFollowed} in programma nei campionati scelti · ${calls} richieste API</p>
+    ${R.statusBanner(r)}
+    ${R.tickets(r)}
+    ${R.shortlist(r.shortlist)}`;
+}
+
+// --- Le mie richieste (solo in questo browser) ----------------------------
+
+function loadRequests() {
+  try {
+    return JSON.parse(store.get(REQ_STORE) || '[]');
+  } catch {
+    return [];
   }
+}
 
-  function renderStats(stats) {
-    $('verdict').textContent = stats.verdict;
-    let html = '';
+function saveRequests(list) {
+  store.set(REQ_STORE, JSON.stringify(list.slice(-MAX_SAVED)));
+}
 
-    const bands = Object.values(stats.bands || {}).filter((b) => b.played);
-    if (bands.length) {
-      html += `<div class="table-scroll"><table><thead><tr>
-        <th>Schedina</th><th class="num">Chiuse</th><th class="num">Vinte</th><th class="num">Attese</th><th class="num">ROI</th>
-      </tr></thead><tbody>${bands
-        .map(
-          (b) => `<tr><td>${esc(b.name)}</td><td class="num">${b.played}</td><td class="num">${b.won}</td>
-          <td class="num">${num(b.expectedWins, 1)}</td><td class="num ${cls(b.roi)}">${signedPct(b.roi)}</td></tr>`
-        )
-        .join('')}</tbody></table></div>
-        <p class="hint">ROI a puntata fissa di 1 € per schedina. «Attese» = somma delle probabilità stimate: se il modello è onesto, le vinte oscillano intorno a questo numero.</p>`;
-    }
+// Ogni richiesta viene salvata, non solo quelle che piacciono: così il
+// riepilogo non diventa ottimista per selezione.
+function saveRequest(r) {
+  if (r.mock) return;
+  const list = loadRequests();
+  list.push({ at: r.generatedAt, date: r.date, status: r.status, request: r.request, tickets: r.tickets.map(compactTicket) });
+  saveRequests(list);
+}
 
-    const a = stats.allCandidates;
-    if (a) {
-      html += `<h3 style="margin-top:16px">Precisione delle probabilità</h3>
-        <p class="hint">Su ${a.n} esiti di ${a.matches} partite concluse (non solo quelli in schedina). Più basso è meglio.</p>
-        <div class="table-scroll"><table><thead><tr><th></th><th class="num">Modello</th><th class="num">Mercato</th></tr></thead><tbody>
-          <tr><td>Brier score</td><td class="num">${num(a.brierModel, 4)}</td><td class="num">${num(a.brierMarket, 4)}</td></tr>
-          <tr><td>Log-loss</td><td class="num">${num(a.logLossModel, 4)}</td><td class="num">${num(a.logLossMarket, 4)}</td></tr>
-          ${a.brierPoisson != null ? `<tr><td>Brier solo Poisson</td><td class="num">${num(a.brierPoisson, 4)}</td><td class="num">${num(a.brierMarketOnPoisson, 4)}</td></tr>` : ''}
-        </tbody></table></div>
-        <p class="hint">Skill rispetto al mercato: <strong class="${cls(a.skillVsMarket)}">${signedPct(a.skillVsMarket, 2)}</strong> (positivo = il modello stima meglio delle quote pulite).</p>
-        <h3 style="margin-top:16px">Calibrazione</h3>
-        <p class="hint">La barra è la frequenza reale, la tacca la probabilità prevista: se coincidono, le percentuali sono affidabili.</p>
-        <div class="calib">${a.calibration
-          .map(
-            (c) => `<div class="calib-row"><span>${esc(c.bin)}</span>
-            <div class="bar"><div class="obs" style="width:${(c.observed * 100).toFixed(1)}%"></div><div class="pred" style="left:${(c.predicted * 100).toFixed(1)}%"></div></div>
-            <span class="num">${pct(c.observed)} · ${c.n}</span></div>`
-          )
-          .join('')}</div>`;
-    }
+function renderRequests() {
+  const list = loadRequests();
+  $('mine-card').hidden = !list.length;
+  if (!list.length) return;
 
-    if (stats.legs) {
-      html += `<p class="hint" style="margin-top:12px">Esiti in schedina: indovinati ${pct(stats.legs.hitRate, 1)} contro ${pct(stats.legs.expectedHitRate, 1)} attesi su ${stats.legsClosed}.</p>`;
-    }
-    $('stats').innerHTML = html;
+  const main = list.map((x) => x.tickets.find((t) => t.featured)).filter(Boolean);
+  const closed = main.filter((t) => t.result === 'won' || t.result === 'lost');
+  const won = closed.filter((t) => t.result === 'won').length;
+  const expected = closed.reduce((a, t) => a + t.prob, 0);
+  $('mine-summary').textContent = closed.length
+    ? `Schedine principali chiuse: ${closed.length}, vinte ${won} (attese ${expected.toFixed(1).replace('.', ',')}).`
+    : 'Nessuna schedina ancora chiusa.';
+
+  $('mine').innerHTML = [...list]
+    .reverse()
+    .slice(0, 20)
+    .map(
+      (x) => `<div class="day">
+      <div class="day-head"><span>${R.esc(R.longDate(x.date))}</span><span class="hint">richiesta ${R.esc(R.dateTime(x.at))} · quota ${x.request.minOdd}–${x.request.maxOdd}</span></div>
+      ${x.status === 'valore_negativo' ? '<span class="badge neg">senza valore</span>' : ''}
+      ${x.tickets.length ? x.tickets.map(R.compactTicketSummary).join('') : '<p class="hint">Nessuna schedina.</p>'}
+    </div>`
+    )
+    .join('');
+}
+
+async function refreshResults() {
+  const client = clientFor(todayRome());
+  if (!client) return;
+  const btn = $('mine-refresh');
+  btn.disabled = true;
+  try {
+    const list = loadRequests();
+    await settleAll({ days: list }, [], client);
+    saveRequests(list);
+    renderRequests();
+  } catch (err) {
+    alert(`Verifica non riuscita: ${err.message}`);
+  } finally {
+    btn.disabled = false;
   }
+}
 
-  function resultLabel(r) {
-    if (r === 'won') return '<span class="res-won">vinta</span>';
-    if (r === 'lost') return '<span class="res-lost">persa</span>';
-    if (r === 'void') return '<span class="res-pending">annullata</span>';
-    return '<span class="res-pending">in corso</span>';
-  }
+// --- Storico ufficiale (corsa automatica giornaliera) ---------------------
 
-  function legResult(l) {
-    const mark = l.result === 'won' ? '✓' : l.result === 'lost' ? '✗' : l.result === 'void' ? 'annullata' : '…';
-    return `${esc(l.match)}: ${esc(l.label)} @ ${odd(l.odd)} ${l.score ? `(${esc(l.score)})` : ''} <strong>${mark}</strong>`;
-  }
-
-  function renderRecent(days) {
-    if (!days?.length) {
-      $('recent-card').hidden = true;
-      return;
-    }
-    $('recent').innerHTML = days
+async function renderOfficial() {
+  try {
+    const r = await fetch('data/latest.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const data = await r.json();
+    $('official-meta').textContent = `Riferimento del ${R.longDate(data.date)}, generato ${R.dateTime(data.generatedAt)} con parametri fissi.`;
+    $('official-ticket').innerHTML = R.statusBanner(data) + R.tickets(data, 'Schedina di riferimento');
+    $('stats').innerHTML = R.stats(data.stats);
+    $('recent').innerHTML = (data.recent || [])
       .map(
-        (d) => `<div class="day">
-        <div class="day-head"><span>${esc(longDate(d.date))}</span>${d.status === 'valore_negativo' ? '<span class="badge neg">senza valore</span>' : ''}</div>
-        ${d.tickets.length ? '' : '<p class="hint">Nessuna schedina.</p>'}
-        ${d.tickets
-          .map(
-            (t) => `<details><summary>${t.featured ? '<strong>Del giorno</strong> · ' : ''}${esc(t.name)} · quota ${odd(t.totalOdd)} · prob. ${pct(t.prob, 1)} · ${resultLabel(t.result)}</summary>
-            <ul>${t.legs.map((l) => `<li>${legResult(l)}</li>`).join('')}</ul></details>`
-          )
-          .join('')}
-      </div>`
+        (d) => `<div class="day"><div class="day-head"><span>${R.esc(R.longDate(d.date))}</span>${d.status === 'valore_negativo' ? '<span class="badge neg">senza valore</span>' : ''}</div>
+        ${d.tickets.length ? d.tickets.map(R.compactTicketSummary).join('') : '<p class="hint">Nessuna schedina.</p>'}</div>`
       )
       .join('');
+  } catch {
+    $('official-meta').textContent = 'La corsa automatica non ha ancora pubblicato dati.';
   }
+}
 
-  fetch('data/latest.json', { cache: 'no-store' })
-    .then((r) => {
-      if (!r.ok) throw new Error(r.status);
-      return r.json();
-    })
-    .then((data) => {
-      tz = data.timezone || tz;
-      const gen = new Date(data.generatedAt).toLocaleString('it-IT', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' });
-      $('meta').textContent = `${longDate(data.date)} · aggiornata ${gen} · ${data.summary.fixturesAnalyzed} partite analizzate`;
-      renderStatus(data);
-      renderTickets(data);
-      renderShortlist(data);
-      renderStats(data.stats);
-      renderRecent(data.recent);
-    })
-    .catch(() => {
-      $('meta').textContent = 'Nessun dato disponibile: la prima schedina verrà pubblicata alla prossima esecuzione automatica.';
-      ['shortlist-card', 'stats-card', 'recent-card'].forEach((id) => ($(id).hidden = true));
-    });
-})();
+async function main() {
+  cfg = await (await fetch('config.json', { cache: 'no-store' })).json();
+  prunePredictionCache();
+  renderForm();
+  renderKey();
+  renderRequests();
+  $('mine-refresh').addEventListener('click', refreshResults);
+  $('mine-clear').addEventListener('click', () => {
+    if (confirm('Cancellare le richieste salvate in questo browser?')) {
+      saveRequests([]);
+      renderRequests();
+    }
+  });
+  renderOfficial();
+}
+
+main();

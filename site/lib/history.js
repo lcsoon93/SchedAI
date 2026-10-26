@@ -1,5 +1,5 @@
 // Storico delle schedine: verifica degli esiti e metriche di calibrazione.
-import { settlePick } from './model.mjs';
+import { settlePick } from './model.js';
 
 const FINISHED = new Set(['FT', 'AET', 'PEN']);
 const VOID = new Set(['PST', 'CANC', 'ABD', 'AWD', 'WO']);

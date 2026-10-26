@@ -11,7 +11,11 @@ function outcome(fx) {
   const status = fx.fixture.status.short;
   if (VOID.has(status)) return 'void';
   if (!FINISHED.has(status)) return null;
-  return { h: fx.score?.fulltime?.home ?? fx.goals.home, a: fx.score?.fulltime?.away ?? fx.goals.away };
+  const ft = fx.score?.fulltime;
+  if (ft?.home != null && ft?.away != null) return { h: ft.home, a: ft.away };
+  // Senza il 90' esplicito, i gol di una partita ai supplementari non valgono.
+  if (status !== 'FT') return null;
+  return { h: fx.goals.home, a: fx.goals.away };
 }
 
 function settleOne(key, fx) {
@@ -121,13 +125,15 @@ export function computeStats(history, candidateDays = []) {
   for (const day of history.days) {
     for (const t of day.tickets) {
       if (t.result === 'won' || t.result === 'lost') {
+        // Le gambe annullate escono dalla probabilità attesa, come dalla quota.
+        const prob = t.legs.reduce((a, l) => a * (l.result === 'void' ? 1 : l.p), 1);
         // La schedina del giorno ha la sua riga, in cima, oltre a quella della fascia.
         const rows = [(bands[t.band] ||= newBand(t.name))];
         if (t.featured) rows.push((featured.row ||= newBand('Schedina del giorno')));
         for (const s of rows) {
           s.played++;
           s.staked += 1;
-          s.expectedWins += t.prob;
+          s.expectedWins += prob;
           if (t.result === 'won') {
             s.won++;
             s.returned += t.settledOdd;
@@ -135,8 +141,8 @@ export function computeStats(history, candidateDays = []) {
         }
         if (t.featured) {
           closed++;
-          expected += t.prob;
-          variance += t.prob * (1 - t.prob);
+          expected += prob;
+          variance += prob * (1 - prob);
           if (t.result === 'won') wins++;
         }
       }
@@ -156,7 +162,7 @@ export function computeStats(history, candidateDays = []) {
   const out = { ticketsClosed: closed, legsClosed: legPairs.length, bands: allBands };
 
   // Calibrazione su tutti gli esiti analizzati (non solo quelli giocati).
-  const allModel = [], allMarket = [];
+  const allModel = [], allMarket = [], poissonModel = [], poissonMarket = [];
   const matches = new Set();
   for (const day of candidateDays) {
     for (const c of day.rows) {
@@ -165,6 +171,10 @@ export function computeStats(history, candidateDays = []) {
       const y = c.r === 'won' ? 1 : 0;
       allModel.push([c.p, y]);
       allMarket.push([c.m, y]);
+      if (c.g != null) {
+        poissonModel.push([c.g, y]);
+        poissonMarket.push([c.m, y]);
+      }
     }
   }
   if (allModel.length) {
@@ -178,6 +188,9 @@ export function computeStats(history, candidateDays = []) {
       logLossModel: logLoss(allModel),
       logLossMarket: logLoss(allMarket),
       calibration: calibration(allModel),
+      // Il Poisson da solo, sugli stessi esiti, per capire quanto vale.
+      brierPoisson: poissonModel.length ? brier(poissonModel) : null,
+      brierMarketOnPoisson: poissonModel.length ? brier(poissonMarket) : null,
     };
   }
   if (closed) {

@@ -99,3 +99,11 @@ test('Storico: schedina con tutte le gambe annullate non conta come vinta', asyn
   const stats = computeStats(history, []);
   assert.equal(stats.ticketsClosed, 0);
 });
+
+test('Storico: ai supplementari senza risultato al 90 la gamba resta aperta', async () => {
+  const { settleAll } = await import('../lib/history.mjs');
+  const history = { days: [{ date: '2026-10-01', tickets: [{ band: 'prudente', legs: [{ fixtureId: 1, key: 'OU|Over 2.5', odd: 2, p: 0.5, result: null }] }] }] };
+  const client = { get: async () => ({ response: [{ fixture: { id: 1, status: { short: 'AET' } }, goals: { home: 2, away: 1 }, score: { fulltime: { home: null, away: null } } }] }) };
+  await settleAll(history, [], client);
+  assert.equal(history.days[0].tickets[0].legs[0].result, null);
+});

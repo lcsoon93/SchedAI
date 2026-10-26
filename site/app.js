@@ -125,6 +125,7 @@
         <div class="table-scroll"><table><thead><tr><th></th><th class="num">Modello</th><th class="num">Mercato</th></tr></thead><tbody>
           <tr><td>Brier score</td><td class="num">${num(a.brierModel, 4)}</td><td class="num">${num(a.brierMarket, 4)}</td></tr>
           <tr><td>Log-loss</td><td class="num">${num(a.logLossModel, 4)}</td><td class="num">${num(a.logLossMarket, 4)}</td></tr>
+          ${a.brierPoisson != null ? `<tr><td>Brier solo Poisson</td><td class="num">${num(a.brierPoisson, 4)}</td><td class="num">${num(a.brierMarketOnPoisson, 4)}</td></tr>` : ''}
         </tbody></table></div>
         <p class="hint">Skill rispetto al mercato: <strong class="${cls(a.skillVsMarket)}">${signedPct(a.skillVsMarket, 2)}</strong> (positivo = il modello stima meglio delle quote pulite).</p>
         <h3 style="margin-top:16px">Calibrazione</h3>

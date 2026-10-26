@@ -53,7 +53,7 @@
   function renderTicket(t, negative) {
     const title = !t.featured ? `Schedina ${esc(t.name)}` : negative ? 'Solo esempio: oggi nessuna giocata consigliata' : 'Schedina del giorno';
     return `<div class="ticket-head">
-          <h3>${title} <span class="hint">· fascia ${t.minOdd}–${t.maxOdd}</span></h3>
+          <h3>${title} <span class="hint">· fascia ${t.minOdd}–${t.maxOdd} · tutta su ${esc(t.bookmaker)}</span></h3>
           <span class="badge ${negative ? 'neg' : ''}">${t.legs.length} esiti</span>
         </div>
         <div class="kpis">

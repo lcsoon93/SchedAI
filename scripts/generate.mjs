@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApiClient } from './lib/api.mjs';
 import { createMockClient } from './lib/mock.mjs';
-import { analyzeFixture, eligibleOptions } from './lib/model.mjs';
+import { analyzeFixture, eligibleOptions, priceAt } from './lib/model.mjs';
 import { buildTicket } from './lib/optimizer.mjs';
 import { settleAll, computeStats } from './lib/history.mjs';
 
@@ -44,52 +44,71 @@ function todayIn(timeZone) {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
 
+// Una multipla si gioca su un solo bookmaker: per ogni book giocabile si
+// costruiscono le schedine con le sue quote, poi per ogni fascia si tiene
+// la più probabile tra i book.
 function makeTickets(analyses, cfg, minEdge, minMarketEdge, minTicketEV) {
-  const groups = analyses
-    .map((a) =>
-      eligibleOptions(a, cfg.selection, minEdge, minMarketEdge).map((o) => ({
-        ...o,
-        fixtureId: a.fixtureId,
-        kickoff: a.kickoff,
-        league: a.league,
-        leagueId: a.leagueId,
-        country: a.country,
-        match: `${a.home} – ${a.away}`,
-        formHome: a.formHome,
-        formAway: a.formAway,
-        xg: a.xg,
-        apiAdvice: a.apiAdvice,
-      }))
-    )
-    .filter((g) => g.length);
+  const context = (a) => ({
+    fixtureId: a.fixtureId,
+    kickoff: a.kickoff,
+    league: a.league,
+    leagueId: a.leagueId,
+    country: a.country,
+    match: `${a.home} – ${a.away}`,
+    formHome: a.formHome,
+    formAway: a.formAway,
+    xg: a.xg,
+    apiAdvice: a.apiAdvice,
+    oddsUpdatedAt: a.oddsUpdatedAt,
+  });
 
-  const tickets = [];
-  for (const band of cfg.ticket.bands) {
-    const t = buildTicket(groups, {
-      minLegs: cfg.ticket.minLegs,
-      maxLegs: cfg.ticket.maxLegs,
-      minOdd: band.minOdd,
-      maxOdd: band.maxOdd,
-      maxPerTag: cfg.ticket.maxPerLeague,
-      tagOf: (o) => o.leagueId,
-      accept: (ticket) => minTicketEV === null || ticket.ev >= minTicketEV,
-    });
-    if (!t) continue;
-    tickets.push({
+  const best = {};
+  for (const bookId of cfg.playableBookmakerIds) {
+    const groups = analyses
+      .map((a) => {
+        const priced = a.options.map((o) => priceAt(o, bookId)).filter(Boolean);
+        return eligibleOptions(priced, cfg.selection, minEdge, minMarketEdge).map((o) => ({ ...o, ...context(a) }));
+      })
+      .filter((g) => g.length);
+    if (groups.length < cfg.ticket.minLegs) continue;
+
+    for (const band of cfg.ticket.bands) {
+      const t = buildTicket(groups, {
+        minLegs: cfg.ticket.minLegs,
+        maxLegs: cfg.ticket.maxLegs,
+        minOdd: band.minOdd,
+        maxOdd: band.maxOdd,
+        maxPerTag: cfg.ticket.maxPerLeague,
+        tagOf: (o) => o.leagueId,
+        accept: (ticket) => minTicketEV === null || ticket.ev >= minTicketEV,
+      });
+      if (t && (!best[band.id] || t.prob > best[band.id].t.prob)) best[band.id] = { t, band };
+    }
+  }
+
+  const tickets = Object.values(best).map(({ t, band }) => {
+    const probMarket = t.legs.reduce((a, l) => a * l.pMarket, 1);
+    return {
       band: band.id,
       name: band.name,
       minOdd: band.minOdd,
       maxOdd: band.maxOdd,
+      bookmaker: t.legs[0].bookmaker,
       totalOdd: t.totalOdd,
       prob: t.prob,
-      probMarket: t.legs.reduce((a, l) => a * l.pMarket, 1),
-      evMarket: t.legs.reduce((a, l) => a * l.pMarket, 1) * t.totalOdd - 1,
+      probMarket,
+      evMarket: probMarket * t.totalOdd - 1,
       ev: t.ev,
       oneIn: Math.round(1 / t.prob),
-      legs: t.legs.map((l) => ({ ...l, fairOdd: Math.round((100 / l.p)) / 100 })),
-    });
-  }
-  return { tickets, candidates: groups.flat() };
+      legs: t.legs.map((l) => ({ ...l, fairOdd: Math.round(100 / l.p) / 100 })),
+    };
+  });
+
+  // Elenco degli esiti con valore, alla quota migliore tra i book.
+  const candidates = analyses.flatMap((a) =>
+    eligibleOptions(a.options, cfg.selection, minEdge, minMarketEdge).map((o) => ({ ...o, ...context(a) }))
+  );
+  return { tickets, candidates };
 }
 
 async function main() {
@@ -197,6 +216,7 @@ async function main() {
       band: t.band,
       name: t.name,
       featured: t.featured,
+      bookmaker: t.bookmaker,
       totalOdd: t.totalOdd,
       prob: t.prob,
       probMarket: t.probMarket,
@@ -210,6 +230,8 @@ async function main() {
         league: l.league,
         kickoff: l.kickoff,
         odd: l.odd,
+        bookmaker: l.bookmaker,
+        oddsUpdatedAt: l.oddsUpdatedAt,
         p: l.p,
         pMarket: l.pMarket,
         result: null,

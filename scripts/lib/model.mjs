@@ -115,15 +115,29 @@ export function marketProbabilities(books, cfg) {
   return out;
 }
 
-// Quota giocabile: la migliore tra i bookmaker dove si può davvero giocare
-// (line shopping). Pinnacle serve solo da riferimento per le probabilità.
-export function offeredOdd(books, key, cfg) {
-  let best = null;
+// Quote dei bookmaker dove si può davvero giocare. Pinnacle serve solo da
+// riferimento per le probabilità. Una multipla si gioca su un solo book,
+// quindi le schedine si costruiscono book per book (vedi priceAt).
+export function playableOffers(books, key, cfg) {
+  const offers = {};
   for (const id of cfg.playableBookmakerIds) {
     const odd = books[id]?.picks[key];
-    if (odd && (!best || odd > best.odd)) best = { odd, bookmaker: books[id].name };
+    if (odd) offers[id] = { odd, bookmaker: books[id].name };
   }
-  return best;
+  return offers;
+}
+
+// L'esito con la quota di un certo bookmaker (null se non la offre).
+export function priceAt(option, bookId) {
+  const offer = option.offers[bookId];
+  if (!offer) return null;
+  return {
+    ...option,
+    odd: offer.odd,
+    bookmaker: offer.bookmaker,
+    edge: option.p * offer.odd - 1,
+    edgeMarket: option.pMarket * offer.odd - 1,
+  };
 }
 
 function num(x) {
@@ -253,8 +267,9 @@ export function analyzeFixture(fx, oddsEntry, prediction, cfg) {
   const options = [];
   for (const key of Object.keys(market)) {
     const [mk, pick] = key.split('|');
-    const offer = offeredOdd(books, key, cfg);
-    if (!offer) continue;
+    const offers = playableOffers(books, key, cfg);
+    const bestId = Object.keys(offers).sort((x, y) => offers[y].odd - offers[x].odd)[0];
+    if (!bestId) continue;
 
     const w = mk === '1X2' || mk === 'DC' ? cfg.weights.result : cfg.weights.goals;
     const pM = market[key];
@@ -273,16 +288,15 @@ export function analyzeFixture(fx, oddsEntry, prediction, cfg) {
       marketLabel: MARKET_LABELS[mk],
       pick,
       label: pickLabel(mk, pick, home, away),
-      odd: offer.odd,
-      bookmaker: offer.bookmaker,
       p,
       pMarket: pM,
       pPoisson: pP ?? null,
       pApi: pA ?? null,
-      edge: p * offer.odd - 1,
-      edgeMarket: pM * offer.odd - 1,
+      offers,
       reasons,
     });
+    // Di default l'esito porta la quota migliore (line shopping).
+    options[options.length - 1] = priceAt(options[options.length - 1], bestId);
   }
 
   return {
@@ -298,13 +312,14 @@ export function analyzeFixture(fx, oddsEntry, prediction, cfg) {
     formAway,
     apiAdvice: prediction?.predictions?.advice || null,
     bookmakers: Object.keys(books).length,
+    oddsUpdatedAt: oddsEntry?.update || null,
     options,
   };
 }
 
 // Filtra gli esiti giocabili secondo le soglie di configurazione.
-export function eligibleOptions(analysis, sel, minEdge, minMarketEdge = null) {
-  return analysis.options.filter((o) => {
+export function eligibleOptions(options, sel, minEdge, minMarketEdge = null) {
+  return options.filter((o) => {
     if (o.odd < sel.minOdd || o.odd > sel.maxOdd) return false;
     if (o.p < sel.minProb) return false;
     if (o.edge < minEdge) return false;

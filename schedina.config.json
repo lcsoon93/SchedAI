@@ -40,5 +40,5 @@
     ]
   },
 
-  "historyDays": 120
+  "candidateDays": 120
 }

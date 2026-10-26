@@ -118,7 +118,7 @@ async function main() {
   try {
     candFiles = (await readdir(candDir)).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
   } catch {}
-  const keepFrom = candFiles.length > cfg.historyDays ? candFiles.length - cfg.historyDays : 0;
+  const keepFrom = candFiles.length > cfg.candidateDays ? candFiles.length - cfg.candidateDays : 0;
   const candidateDays = [];
   for (const f of candFiles.slice(keepFrom)) {
     const d = await readJson(join(candDir, f), null);
@@ -217,7 +217,6 @@ async function main() {
     })),
   });
   history.days.sort((a, b) => a.date.localeCompare(b.date));
-  history.days = history.days.slice(-cfg.historyDays);
 
   const latest = {
     generatedAt: new Date().toISOString(),

@@ -51,8 +51,9 @@
   }
 
   function renderTicket(t, negative) {
+    const title = !t.featured ? `Schedina ${esc(t.name)}` : negative ? 'Solo esempio: oggi nessuna giocata consigliata' : 'Schedina del giorno';
     return `<div class="ticket-head">
-          <h3>${t.featured ? 'Schedina del giorno' : `Schedina ${esc(t.name)}`} <span class="hint">· fascia ${t.minOdd}–${t.maxOdd}</span></h3>
+          <h3>${title} <span class="hint">· fascia ${t.minOdd}–${t.maxOdd}</span></h3>
           <span class="badge ${negative ? 'neg' : ''}">${t.legs.length} esiti</span>
         </div>
         <div class="kpis">
@@ -70,7 +71,7 @@
     const negative = data.status !== 'valore_positivo';
     const main = data.tickets.find((t) => t.featured) || data.tickets[0];
     const others = data.tickets.filter((t) => t !== main);
-    let html = main ? `<article class="card ticket featured">${renderTicket(main, negative)}</article>` : '';
+    let html = main ? `<article class="card ticket ${negative ? '' : 'featured'}">${renderTicket(main, negative)}</article>` : '';
     if (others.length) {
       html += `<details class="card alternatives"><summary><strong>Alternative più rischiose</strong>
         <span class="hint">· ${others.map((t) => `${esc(t.name)} a quota ${odd(t.totalOdd)}, 1 su ${t.oneIn}`).join(' · ')}</span></summary>

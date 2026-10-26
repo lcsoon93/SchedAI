@@ -10,7 +10,7 @@
 
   "sharpBookmakerId": 4,
   "sharpWeight": 3,
-  "playableBookmakerIds": [8, 6, 7, 16],
+  "playableBookmakerIds": [8],
 
   "weights": {
     "result": { "market": 0.75, "poisson": 0.25, "api": 0 },

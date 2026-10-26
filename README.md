@@ -26,7 +26,7 @@ La chiave API non lascia mai la Action: la pagina legge solo JSON statici.
 | Modello gol | Gol attesi dalle medie casa/trasferta (shrinkage verso 1,45/1,15 con poche partite), Poisson con correzione Dixon-Coles. |
 | Previsione API | Percentuali 1X2 di API-Football: salvate per la ricalibrazione, peso 0 di default. |
 | Fusione | Media pesata in log-odds: mercato 75%, Poisson 25% (`schedina.config.json`). |
-| Filtri | Quote dei book giocabili (`playableBookmakerIds`: Bet365, Bwin, William Hill, Unibet; ogni schedina su un solo book), quota 1,30–4,00, prob. ≥ 40%, vantaggio ≥ 2% **e** vantaggio ≥ 0 con la sola probabilità di Pinnacle, scarto modello/mercato ≤ 12 punti, almeno 3 partite giocate. |
+| Filtri | Quote di Bet365 (`playableBookmakerIds`; con più book ogni schedina resta su un solo book), quota 1,30–4,00, prob. ≥ 40%, vantaggio ≥ 2% **e** vantaggio ≥ 0 con la sola probabilità di Pinnacle, scarto modello/mercato ≤ 12 punti, almeno 3 partite giocate. |
 | Schedina | Knapsack a gruppi: max 1 esito per partita e 2 per campionato; per ogni fascia (10–20, 20–50, 50–100) la combinazione **più probabile** con valore atteso ≥ +5%. |
 | Nessun valore | Se non esiste una schedina con valore positivo, si pubblica la meno sfavorevole con stato `valore_negativo` e la pagina dice di non giocarla. |
 | Verifica | Si salvano schedine e **tutti** gli esiti analizzati; ogni giorno si refertano e si calcolano Brier, log-loss, calibrazione, skill vs mercato, ROI e z-score. Sotto 300 partite concluse il verdetto è «campione troppo piccolo». Lo storico è solo-aggiunta: rilanciare la Action non cambia la schedina già pubblicata (salvo `--force`). |
